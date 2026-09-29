@@ -895,7 +895,8 @@ where
 }
 
 /// Deserializes catalog models while promoting the legacy top-level instruction field into Model
-/// Messages V2 when no canonical instruction template is present.
+/// Messages V2 when no canonical instruction template is present, falling back to the built-in
+/// default prompt when neither is set.
 #[doc(hidden)]
 pub fn deserialize_model_infos_with_legacy_base<'de, D>(
     deserializer: D,
@@ -904,38 +905,24 @@ where
     D: Deserializer<'de>,
 {
     let models = Vec::<ModelInfoWithLegacyBaseInstructions>::deserialize(deserializer)?;
-    models
+    Ok(models
         .into_iter()
         .map(|legacy_model| {
             let ModelInfoWithLegacyBaseInstructions {
                 base_instructions,
                 mut model,
             } = legacy_model;
-            if let Some(base_instructions) = base_instructions
-                && model
-                    .model_messages
-                    .as_ref()
-                    .and_then(|messages| messages.instructions_template.as_ref())
-                    .is_none()
-            {
-                let messages = model.model_messages.get_or_insert_default();
-                messages.instructions_template = Some(base_instructions);
+            let messages = model.model_messages.get_or_insert_default();
+            if messages.instructions_template.is_none() {
+                // @why: third-party catalogs rely on the built-in prompt instead of copying it.
+                messages.instructions_template = Some(
+                    base_instructions
+                        .unwrap_or_else(|| crate::models::BASE_INSTRUCTIONS_DEFAULT.to_string()),
+                );
             }
-            if model
-                .model_messages
-                .as_ref()
-                .and_then(|messages| messages.instructions_template.as_ref())
-                .is_none()
-            {
-                let model_slug = &model.slug;
-                return Err(D::Error::custom(format!(
-                    "model `{model_slug}` is missing both `base_instructions` and \
-                     `model_messages.instructions_template`"
-                )));
-            }
-            Ok(model)
+            model
         })
-        .collect()
+        .collect())
 }
 
 // convert ModelInfo to ModelPreset
@@ -1453,7 +1440,7 @@ mod tests {
     }
 
     #[test]
-    fn models_response_rejects_model_without_instruction_source() {
+    fn models_response_defaults_model_without_instruction_source() {
         let mut value = serde_json::to_value(ModelsResponse {
             models: vec![test_model(/*spec*/ None)],
         })
@@ -1464,13 +1451,22 @@ mod tests {
             .remove("base_instructions")
             .expect("serialized model should include legacy base instructions");
 
-        let error = serde_json::from_value::<ModelsResponse>(value)
-            .expect_err("model without instructions should be rejected");
+        let response = serde_json::from_value::<ModelsResponse>(value)
+            .expect("model without instructions should use the default prompt");
 
         assert_eq!(
-            error.to_string(),
-            "model `test-model` is missing both `base_instructions` and \
-             `model_messages.instructions_template`"
+            response,
+            ModelsResponse {
+                models: vec![ModelInfo {
+                    model_messages: Some(ModelMessages {
+                        instructions_template: Some(
+                            crate::models::BASE_INSTRUCTIONS_DEFAULT.to_string()
+                        ),
+                        ..Default::default()
+                    }),
+                    ..test_model(/*spec*/ None)
+                }],
+            }
         );
     }
 
