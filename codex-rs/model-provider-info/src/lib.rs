@@ -27,6 +27,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::path::Component;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::PoisonError;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -144,6 +145,10 @@ pub struct ModelProviderInfo {
     pub name: String,
     /// Base URL for the provider's OpenAI-compatible API.
     pub base_url: Option<String>,
+    /// Absolute path of a Unix-domain socket that carries every HTTP request to this provider.
+    /// `base_url` still supplies the request path and `Host` header; DNS, TCP and proxies are
+    /// bypassed, and WebSockets are disabled. Unix only.
+    pub unix_socket: Option<PathBuf>,
     /// Optional full URL for a Codex-native model catalog. When unset, OpenAI discovery
     /// uses the Codex backend unless `base_url` overrides the inference endpoint.
     pub model_catalog_url: Option<RedactedString>,
@@ -295,6 +300,9 @@ other non-default provider fields are not supported"
     }
 
     pub fn validate(&self) -> std::result::Result<(), String> {
+        if let Some(unix_socket) = &self.unix_socket {
+            validate_unix_socket(unix_socket, self.supports_websockets)?;
+        }
         if let Some(gateway) = &self.gateway_oauth {
             gateway.validate(self)?;
         }
@@ -558,6 +566,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: true,
             supports_websockets: true,
             supports_standalone_web_search: true,
+            unix_socket: None,
             include_internal_metadata: true,
         }
     }
@@ -597,6 +606,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            unix_socket: None,
             include_internal_metadata: false,
         }
     }
@@ -651,6 +661,25 @@ pub const DEFAULT_OLLAMA_PORT: u16 = 11434;
 
 pub const LMSTUDIO_OSS_PROVIDER_ID: &str = "lmstudio";
 pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
+
+fn validate_unix_socket(
+    unix_socket: &Path,
+    supports_websockets: bool,
+) -> std::result::Result<(), String> {
+    if !cfg!(unix) {
+        return Err("provider unix_socket is only supported on Unix".to_string());
+    }
+    if !unix_socket.is_absolute() {
+        return Err(format!(
+            "provider unix_socket must be an absolute path, got `{}`",
+            unix_socket.display()
+        ));
+    }
+    if supports_websockets {
+        return Err("provider unix_socket cannot be combined with supports_websockets".to_string());
+    }
+    Ok(())
+}
 
 /// Built-in default provider list.
 pub fn built_in_model_providers(
@@ -770,6 +799,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        unix_socket: None,
         include_internal_metadata: false,
     }
 }

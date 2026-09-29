@@ -1,5 +1,6 @@
 use std::fmt;
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +23,7 @@ use codex_login::GatewayAuthManager;
 use codex_login::collect_auth_env_telemetry;
 use codex_login::default_client::ClientRedirectPolicy;
 use codex_login::default_client::create_client_for_route_async;
+use codex_login::default_client::create_client_for_unix_socket;
 use codex_model_provider_info::CHATGPT_CODEX_BASE_URL;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::ModelsEndpointClient;
@@ -66,10 +68,16 @@ impl OpenAiModelsEndpoint {
             ClientRedirectPolicy::Default
         };
         Self {
-            provider_info,
             auth_manager,
             gateway_auth_manager,
-            transport_builder: Arc::new(RouteAwareModelsTransportBuilder { redirect_policy }),
+            transport_builder: match &provider_info.unix_socket {
+                Some(socket_path) => Arc::new(UnixSocketModelsTransportBuilder {
+                    socket_path: socket_path.clone(),
+                    redirect_policy,
+                }),
+                None => Arc::new(RouteAwareModelsTransportBuilder { redirect_policy }),
+            },
+            provider_info,
         }
     }
 
@@ -242,7 +250,8 @@ type ModelsTransportFuture<'a> =
 
 /// Builds the concrete transport selected for one models request.
 ///
-/// Implementations must honor the supplied request-time client factory and exact request URL.
+/// Implementations must honor the supplied request-time client factory and exact request URL,
+/// except that a provider pinned to a Unix-domain socket always connects through that socket.
 trait ModelsTransportBuilder: fmt::Debug + Send + Sync {
     fn build(
         &self,
@@ -275,6 +284,26 @@ impl ModelsTransportBuilder for RouteAwareModelsTransportBuilder {
                 ClientRedirectPolicy::Default => client,
                 ClientRedirectPolicy::Reject => client.without_request_logging(),
             };
+            Ok(ReqwestTransport::from_http_client(client))
+        })
+    }
+}
+
+/// Sends catalog requests through the provider's Unix-domain socket.
+#[derive(Debug)]
+struct UnixSocketModelsTransportBuilder {
+    socket_path: PathBuf,
+    redirect_policy: ClientRedirectPolicy,
+}
+
+impl ModelsTransportBuilder for UnixSocketModelsTransportBuilder {
+    fn build(
+        &self,
+        _http_client_factory: HttpClientFactory,
+        _request_url: String,
+    ) -> ModelsTransportFuture<'_> {
+        Box::pin(async move {
+            let client = create_client_for_unix_socket(&self.socket_path, self.redirect_policy)?;
             Ok(ReqwestTransport::from_http_client(client))
         })
     }

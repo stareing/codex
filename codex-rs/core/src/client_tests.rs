@@ -2122,3 +2122,92 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
     assert_eq!(recorded["output_items"], serde_json::to_value(&delivered)?);
     Ok(())
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn chat_provider_with_unix_socket_streams_through_the_socket() -> anyhow::Result<()> {
+    use std::io::Read;
+    use std::io::Write;
+
+    let socket_dir = tempfile::tempdir()?;
+    let socket_path = socket_dir.path().join("llm.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
+    let server = std::thread::spawn(move || -> std::io::Result<String> {
+        let (mut stream, _) = listener.accept()?;
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let bytes_read = stream.read(&mut chunk)?;
+            if bytes_read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..bytes_read]);
+        }
+        let body = concat!(
+            "data: {\"id\":\"chatcmpl-uds\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"id\":\"chatcmpl-uds\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )?;
+        let head = String::from_utf8_lossy(&request).to_ascii_lowercase();
+        Ok(head
+            .split("\r\n\r\n")
+            .next()
+            .unwrap_or_default()
+            .to_string())
+    });
+    let provider = ModelProviderInfo {
+        name: "nim".to_string(),
+        base_url: Some("http://nvidia.llm.internal/v1".to_string()),
+        unix_socket: Some(socket_path),
+        wire_api: WireApi::Chat,
+        // Would switch to WebSockets if the unix socket did not force HTTP.
+        supports_websockets: false,
+        ..ModelProviderInfo::default()
+    };
+    let mut client = test_model_client(SessionSource::Cli);
+    Arc::get_mut(&mut client.state)
+        .expect("test client should have unique session state")
+        .provider = create_model_provider(provider, /*auth_manager*/ None);
+    assert!(!client.responses_websocket_enabled());
+    let responses_metadata = test_responses_metadata_for_client(
+        &client,
+        /*turn_id*/ None,
+        format!("{}:0", client.state.thread_id),
+        /*parent_thread_id*/ None,
+        TestCodexResponsesRequestKind::Turn,
+    );
+    let mut session = client.new_session();
+    let mut stream = session
+        .stream(
+            &Prompt::default(),
+            &test_model_info(),
+            &test_session_telemetry(),
+            /*effort*/ None,
+            codex_protocol::config_types::ReasoningSummary::None,
+            /*service_tier*/ None,
+            &responses_metadata,
+            &InferenceTraceContext::disabled(),
+        )
+        .await?;
+    let mut completed_id = None;
+    while let Some(event) = stream.next().await {
+        if let ResponseEvent::Completed { response_id, .. } = event? {
+            completed_id = Some(response_id);
+        }
+    }
+
+    assert_eq!(completed_id.as_deref(), Some("chatcmpl-uds"));
+    let head = server.join().expect("unix listener thread should finish")?;
+    let mut lines = head.lines();
+    assert_eq!(lines.next(), Some("post /v1/chat/completions http/1.1"));
+    assert!(
+        lines.any(|line| line == "host: nvidia.llm.internal"),
+        "{head}"
+    );
+    Ok(())
+}

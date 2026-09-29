@@ -54,3 +54,91 @@ async fn custom_ca_fallback_preserves_builder_configuration() {
             .any(|line| line.eq_ignore_ascii_case("x-builder-test: preserved"))
     );
 }
+
+/// Accepts one HTTP/1.1 request on `listener`, answers 200, and returns the raw request head.
+#[cfg(unix)]
+fn serve_one_unix_request(
+    listener: std::os::unix::net::UnixListener,
+) -> std::thread::JoinHandle<String> {
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("unix listener should accept");
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let bytes_read = stream.read(&mut chunk).expect("HTTP request should read");
+            assert!(bytes_read > 0, "HTTP request should include headers");
+            request.extend_from_slice(&chunk[..bytes_read]);
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .expect("unix listener should write response");
+        let request = String::from_utf8(request).expect("HTTP request should be UTF-8");
+        request
+            .split("\r\n\r\n")
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    })
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unix_socket_client_sends_requests_through_the_socket() {
+    let socket_dir = tempfile::tempdir().expect("socket dir");
+    let socket_path = socket_dir.path().join("llm.sock");
+    let listener =
+        std::os::unix::net::UnixListener::bind(&socket_path).expect("unix listener should bind");
+    let server = serve_one_unix_request(listener);
+    let client = HttpClientBuilder::new()
+        .build_unix_socket(&socket_path)
+        .expect("unix socket client should build");
+
+    let response = client
+        .post("http://nvidia.llm.internal/v1/chat/completions")
+        .send()
+        .await
+        .expect("request should reach the unix socket");
+
+    assert!(response.status().is_success());
+    let head = server.join().expect("unix listener should finish");
+    let mut lines = head.lines();
+    assert_eq!(
+        lines.next(),
+        Some("post /v1/chat/completions http/1.1"),
+        "{head}"
+    );
+    assert!(
+        lines.any(|line| line == "host: nvidia.llm.internal"),
+        "{head}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unix_socket_client_ignores_configured_proxies() {
+    let socket_dir = tempfile::tempdir().expect("socket dir");
+    let socket_path = socket_dir.path().join("llm.sock");
+    let listener =
+        std::os::unix::net::UnixListener::bind(&socket_path).expect("unix listener should bind");
+    let server = serve_one_unix_request(listener);
+    // A proxy that would refuse connections: reaching the socket proves it was ignored.
+    let proxied = reqwest::Client::builder()
+        .proxy(reqwest::Proxy::all("http://127.0.0.1:9").expect("proxy url should parse"));
+    let client = unix_socket_reqwest_builder(proxied, &socket_path)
+        .build()
+        .expect("unix socket client should build");
+
+    let response = client
+        .get("http://nvidia.llm.internal/v1/models")
+        .send()
+        .await
+        .expect("request should bypass the proxy and reach the unix socket");
+
+    assert!(response.status().is_success());
+    let head = server.join().expect("unix listener should finish");
+    assert_eq!(
+        head.lines().next(),
+        Some("get /v1/models http/1.1"),
+        "{head}"
+    );
+}

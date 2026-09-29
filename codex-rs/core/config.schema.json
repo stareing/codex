@@ -2697,6 +2697,10 @@
           "description": "Whether this provider supports the Responses API WebSocket transport.",
           "type": "boolean"
         },
+        "unix_socket": {
+          "description": "Absolute path of a Unix-domain socket that carries every HTTP request to this provider. `base_url` still supplies the request path and `Host` header; DNS, TCP and proxies are bypassed, and WebSockets are disabled. Unix only.",
+          "type": "string"
+        },
         "websocket_connect_timeout_ms": {
           "description": "Maximum time (in milliseconds) to wait for a websocket connection attempt before treating it as failed.",
           "format": "uint64",
