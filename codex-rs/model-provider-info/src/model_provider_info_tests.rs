@@ -96,6 +96,7 @@ base_url = "http://localhost:11434/v1"
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        unix_socket: None,
         include_internal_metadata: false,
     };
 
@@ -134,6 +135,7 @@ query_params = { api-version = "2025-04-01-preview" }
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        unix_socket: None,
         include_internal_metadata: false,
     };
 
@@ -176,6 +178,7 @@ supports_standalone_web_search = true
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: true,
+        unix_socket: None,
         include_internal_metadata: false,
     };
 
@@ -389,6 +392,7 @@ fn test_create_amazon_bedrock_provider() {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            unix_socket: None,
             include_internal_metadata: false,
         }
     );
@@ -900,5 +904,51 @@ model_catalog_url = "https://gateway.example/codex/catalog?token=catalog-secret"
             .unwrap()
             .base_url,
         "https://gateway.example/v1"
+    );
+}
+
+#[test]
+fn test_deserialize_unix_socket_provider() {
+    let provider_toml = r#"
+name = "NVIDIA NIM via egress proxy"
+base_url = "http://nvidia.llm.internal/v1"
+unix_socket = "/run/llm-egress/nvidia.sock"
+wire_api = "chat"
+        "#;
+
+    let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
+    assert_eq!(
+        provider,
+        ModelProviderInfo {
+            name: "NVIDIA NIM via egress proxy".into(),
+            base_url: Some("http://nvidia.llm.internal/v1".into()),
+            unix_socket: Some(PathBuf::from("/run/llm-egress/nvidia.sock")),
+            wire_api: WireApi::Chat,
+            ..ModelProviderInfo::default()
+        }
+    );
+    assert_eq!(provider.validate(), Ok(()));
+}
+
+#[test]
+fn test_validate_rejects_invalid_unix_socket_settings() {
+    let relative = ModelProviderInfo {
+        name: "Example".into(),
+        unix_socket: Some(PathBuf::from("run/llm.sock")),
+        ..ModelProviderInfo::default()
+    };
+    let with_websockets = ModelProviderInfo {
+        name: "Example".into(),
+        unix_socket: Some(PathBuf::from("/run/llm.sock")),
+        supports_websockets: true,
+        ..ModelProviderInfo::default()
+    };
+
+    assert_eq!(
+        (relative.validate(), with_websockets.validate()),
+        (
+            Err("provider unix_socket must be an absolute path, got `run/llm.sock`".to_string()),
+            Err("provider unix_socket cannot be combined with supports_websockets".to_string()),
+        )
     );
 }

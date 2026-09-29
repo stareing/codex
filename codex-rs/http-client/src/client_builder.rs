@@ -250,6 +250,24 @@ impl HttpClientBuilder {
         self.build_with_proxy_routing(ProxyRouting::Direct)
     }
 
+    /// Builds a client that sends every request through the Unix-domain socket at `socket_path`.
+    ///
+    /// The request URL still supplies the path and `Host` header, but no DNS lookup, TCP
+    /// connection, or proxy (configured or from the environment) is used; `https` URLs still
+    /// negotiate TLS over the socket. This deliberately bypasses [`HttpClientFactory`]: the socket
+    /// is the only route, so there is no outbound proxy policy to apply.
+    #[cfg(unix)]
+    pub fn build_unix_socket(
+        mut self,
+        socket_path: &std::path::Path,
+    ) -> Result<HttpClient, BuildCustomCaTransportError> {
+        let request_logging = self.request_logging;
+        let default_headers = self.default_headers.take().unwrap_or_default();
+        let builder = unix_socket_reqwest_builder(self.base_reqwest_builder(), socket_path);
+        build_reqwest_client_with_custom_ca(builder)
+            .map(|inner| HttpClient::from_parts(inner, request_logging, default_headers))
+    }
+
     /// Builds a transport-default client while preserving the legacy custom-CA fallback.
     ///
     /// # Legacy compatibility only
@@ -407,6 +425,15 @@ impl Default for HttpClientBuilder {
             tls: HttpClientTlsConfig::default(),
         }
     }
+}
+
+/// @invariant: proxies are cleared so a socket-bound client never tunnels through a proxy.
+#[cfg(unix)]
+fn unix_socket_reqwest_builder(
+    builder: reqwest::ClientBuilder,
+    socket_path: &std::path::Path,
+) -> reqwest::ClientBuilder {
+    builder.no_proxy().unix_socket(socket_path.to_path_buf())
 }
 
 #[derive(Clone, Copy)]

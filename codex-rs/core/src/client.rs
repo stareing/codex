@@ -80,6 +80,7 @@ use codex_login::UnauthorizedRecovery;
 use codex_login::default_client::ClientRedirectPolicy;
 use codex_login::default_client::add_originator_header;
 use codex_login::default_client::create_client_for_route;
+use codex_login::default_client::create_client_for_unix_socket;
 use codex_otel::SessionTelemetry;
 use codex_otel::WEBSOCKET_CONTINUATION_COUNT_METRIC;
 use codex_otel::current_span_w3c_trace_context;
@@ -1026,6 +1027,7 @@ impl ModelClient {
     pub fn responses_websocket_enabled(&self) -> bool {
         let provider_info = self.state.provider.info();
         if provider_info.wire_api == WireApi::Chat
+            || provider_info.unix_socket.is_some()
             || !provider_info.supports_websockets
             || self.state.disable_websockets.load(Ordering::Relaxed)
         {
@@ -1191,13 +1193,16 @@ impl ModelClient {
         } else {
             redirect_policy
         };
-        let client = create_client_for_route(
-            &self.http_client_factory,
-            &api_provider.url_for_path(endpoint),
-            ClientRouteClass::Api,
-            redirect_policy,
-        )
-        .map_err(std::io::Error::from)?;
+        let client = match &self.state.provider.info().unix_socket {
+            Some(socket_path) => create_client_for_unix_socket(socket_path, redirect_policy)?,
+            None => create_client_for_route(
+                &self.http_client_factory,
+                &api_provider.url_for_path(endpoint),
+                ClientRouteClass::Api,
+                redirect_policy,
+            )
+            .map_err(std::io::Error::from)?,
+        };
         Ok(ReqwestTransport::from_http_client(client))
     }
 

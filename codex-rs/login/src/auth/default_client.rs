@@ -305,6 +305,47 @@ fn create_client_for_route_with_builder(
     builder.build_respecting_outbound_proxy_policy(http_client_factory, request_url, route_class)
 }
 
+/// Builds the default Codex HTTP client bound to a provider's Unix-domain socket.
+///
+/// Every request goes through `socket_path`; the request URL only supplies the path and `Host`
+/// header, and no proxy or outbound route policy applies.
+///
+/// @error: `Unsupported` on platforms without Unix-domain sockets.
+pub fn create_client_for_unix_socket(
+    socket_path: &std::path::Path,
+    redirect_policy: ClientRedirectPolicy,
+) -> std::io::Result<HttpClient> {
+    let builder = match redirect_policy {
+        ClientRedirectPolicy::Default => default_http_client_builder(),
+        ClientRedirectPolicy::Reject => default_http_client_builder().without_redirects(),
+    };
+    build_unix_socket_client(builder, socket_path)
+}
+
+#[cfg(unix)]
+fn build_unix_socket_client(
+    builder: HttpClientBuilder,
+    socket_path: &std::path::Path,
+) -> std::io::Result<HttpClient> {
+    builder
+        .build_unix_socket(socket_path)
+        .map_err(std::io::Error::from)
+}
+
+#[cfg(not(unix))]
+fn build_unix_socket_client(
+    _builder: HttpClientBuilder,
+    socket_path: &std::path::Path,
+) -> std::io::Result<HttpClient> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        format!(
+            "unix socket transport is not supported on this platform: {}",
+            socket_path.display()
+        ),
+    ))
+}
+
 /// Redirect handling for the shared HTTP client builders.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClientRedirectPolicy {
