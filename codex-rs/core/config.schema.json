@@ -6523,6 +6523,13 @@
             "responses"
           ],
           "type": "string"
+        },
+        {
+          "description": "The Chat Completions API (`POST /chat/completions` with `stream: true`) spoken by OpenAI-compatible providers that do not implement the Responses API.",
+          "enum": [
+            "chat"
+          ],
+          "type": "string"
         }
       ]
     },

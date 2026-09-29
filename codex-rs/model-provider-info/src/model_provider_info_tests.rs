@@ -184,16 +184,40 @@ supports_standalone_web_search = true
 }
 
 #[test]
-fn test_deserialize_chat_wire_api_shows_helpful_error() {
+fn test_deserialize_chat_wire_api() {
     let provider_toml = r#"
-name = "OpenAI using Chat Completions"
-base_url = "https://api.openai.com/v1"
-env_key = "OPENAI_API_KEY"
+name = "NVIDIA NIM"
+base_url = "https://integrate.api.nvidia.com/v1"
+env_key = "NVIDIA_API_KEY"
 wire_api = "chat"
         "#;
 
+    let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
+    assert_eq!(
+        provider,
+        ModelProviderInfo {
+            name: "NVIDIA NIM".into(),
+            base_url: Some("https://integrate.api.nvidia.com/v1".into()),
+            env_key: Some("NVIDIA_API_KEY".into()),
+            wire_api: WireApi::Chat,
+            ..ModelProviderInfo::default()
+        }
+    );
+}
+
+#[test]
+fn test_deserialize_unknown_wire_api_lists_supported_values() {
+    let provider_toml = r#"
+name = "Example"
+wire_api = "completions"
+        "#;
+
     let err = toml::from_str::<ModelProviderInfo>(provider_toml).unwrap_err();
-    assert!(err.to_string().contains(CHAT_WIRE_API_REMOVED_ERROR));
+    assert!(
+        err.to_string()
+            .contains("unknown variant `completions`, expected `responses` or `chat`"),
+        "{err}"
+    );
 }
 
 #[test]

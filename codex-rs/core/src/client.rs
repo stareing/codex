@@ -32,6 +32,8 @@ use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+#[path = "client_chat.rs"]
+mod chat;
 #[path = "client_tool_metadata.rs"]
 mod tool_metadata;
 
@@ -1022,7 +1024,9 @@ impl ModelClient {
     ///
     /// WebSocket use is controlled by provider capability and session-scoped fallback state.
     pub fn responses_websocket_enabled(&self) -> bool {
-        if !self.state.provider.info().supports_websockets
+        let provider_info = self.state.provider.info();
+        if provider_info.wire_api == WireApi::Chat
+            || !provider_info.supports_websockets
             || self.state.disable_websockets.load(Ordering::Relaxed)
         {
             return false;
@@ -2249,6 +2253,19 @@ impl ModelClientSession {
                 }
 
                 self.stream_responses_api(
+                    prompt,
+                    model_info,
+                    session_telemetry,
+                    effort,
+                    summary,
+                    service_tier,
+                    responses_metadata,
+                    inference_trace,
+                )
+                .await
+            }
+            WireApi::Chat => {
+                self.stream_chat_api(
                     prompt,
                     model_info,
                     session_telemetry,
