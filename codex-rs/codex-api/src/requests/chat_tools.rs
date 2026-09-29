@@ -4,8 +4,8 @@
 //! - `function` tools pass through as function tools;
 //! - `custom` (freeform) tools become function tools with a single required
 //!   string parameter named [`FREEFORM_INPUT_ARGUMENT`];
-//! - `namespace` tools are flattened to `<namespace><name>` (the same spelling
-//!   as [`ToolName`]'s `Display`);
+//! - `namespace` tools are flattened to `<namespace>__<name>` (the delimiter is
+//!   not repeated when the namespace already ends with it, e.g. `mcp__docs__`);
 //! - hosted tools (`web_search`, `tool_search`, `image_generation`, ...) are
 //!   skipped with a warning because a chat provider cannot execute them.
 //!
@@ -70,9 +70,26 @@ impl ChatToolIndex {
     }
 }
 
+/// Joins a namespace and a tool name in a flattened chat function name.
+const NAMESPACE_DELIMITER: &str = "__";
+
 /// Chat-visible function name for a Responses tool identity.
+///
+/// Namespaces arrive both with (`mcp__docs__`) and without (`mcp__docs`) a
+/// trailing delimiter; plain concatenation (`ToolName`'s `Display`) would fuse
+/// the latter into `mcp__docssearch`, a name no model can be expected to use.
 pub(crate) fn chat_tool_name(namespace: Option<&str>, name: &str) -> String {
-    ToolName::new(namespace.map(str::to_string), name).to_string()
+    let tool = ToolName::new(namespace.map(str::to_string), name);
+    match tool.namespace.as_deref() {
+        Some(namespace) if !tool.is_default_namespace() => {
+            if namespace.ends_with(NAMESPACE_DELIMITER) {
+                format!("{namespace}{name}")
+            } else {
+                format!("{namespace}{NAMESPACE_DELIMITER}{name}")
+            }
+        }
+        _ => name.to_string(),
+    }
 }
 
 pub(crate) struct ChatTools {

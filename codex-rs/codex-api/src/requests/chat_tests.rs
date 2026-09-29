@@ -330,3 +330,44 @@ fn omits_tool_fields_without_tools() {
     };
     assert_eq!(actual, expected);
 }
+
+#[test]
+fn namespace_without_trailing_delimiter_is_joined_with_delimiter() {
+    // Regression: MCP namespaces arrive as `mcp__echo` (no trailing `__`);
+    // plain concatenation produced `mcp__echoshout`.
+    let tools = json!([{
+        "type": "namespace",
+        "name": "mcp__echo",
+        "description": "Echo server.",
+        "tools": [{
+            "type": "function",
+            "name": "shout",
+            "description": "Shout.",
+            "strict": false,
+            "parameters": {"type": "object", "properties": {}}
+        }]
+    }]);
+    let input = vec![
+        message("user", vec![ContentItem::InputText { text: "hi".to_string() }]),
+        function_call("call_1", "shout", Some("mcp__echo"), "{}"),
+    ];
+
+    let actual = build_chat_request(&request(input, Some(tools))).expect("request converts");
+
+    assert_eq!(actual.body["tools"][0]["function"]["name"], json!("mcp__echo__shout"));
+    assert_eq!(
+        actual.body["messages"][2]["tool_calls"][0]["function"]["name"],
+        json!("mcp__echo__shout")
+    );
+    assert_eq!(
+        actual.tool_index,
+        ChatToolIndex::from_targets([(
+            "mcp__echo__shout".to_string(),
+            ChatToolTarget {
+                namespace: Some("mcp__echo".to_string()),
+                name: "shout".to_string(),
+                kind: ChatToolKind::Function,
+            },
+        )])
+    );
+}
