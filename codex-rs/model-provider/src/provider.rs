@@ -15,6 +15,7 @@ use codex_login::GatewayAuthManager;
 use codex_login::WorkspaceRoutingRequest;
 use codex_login::default_client::ClientRedirectPolicy;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
 use codex_models_manager::cache::ModelsCache;
 use codex_models_manager::manager::OpenAiModelsManager;
 use codex_models_manager::manager::SharedModelsManager;
@@ -419,17 +420,26 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
-        let remote_compaction = if self.info.is_openai()
-            || is_azure_responses_provider(&self.info.name, self.info.base_url.as_deref())
-        {
-            RemoteCompactionSupport::V2
-        } else {
-            RemoteCompactionSupport::Unsupported
-        };
-
-        ProviderCapabilities {
-            remote_compaction,
-            ..ProviderCapabilities::default()
+        match self.info.wire_api {
+            WireApi::Responses => {
+                let remote_compaction = if self.info.is_openai()
+                    || is_azure_responses_provider(&self.info.name, self.info.base_url.as_deref())
+                {
+                    RemoteCompactionSupport::V2
+                } else {
+                    RemoteCompactionSupport::Unsupported
+                };
+                ProviderCapabilities {
+                    remote_compaction,
+                    ..ProviderCapabilities::default()
+                }
+            }
+            // Chat Completions providers cannot run hosted Responses tools or remote compaction.
+            WireApi::Chat => ProviderCapabilities {
+                web_search: false,
+                remote_compaction: RemoteCompactionSupport::Unsupported,
+                ..ProviderCapabilities::default()
+            },
         }
     }
 
@@ -805,12 +815,42 @@ mod tests {
                 provider_for("https://example.test/v1".to_string()),
                 RemoteCompactionSupport::Unsupported,
             ),
+            (
+                ModelProviderInfo {
+                    name: "Azure".to_string(),
+                    base_url: Some("https://example.openai.azure.com/openai/v1".to_string()),
+                    wire_api: WireApi::Chat,
+                    ..ModelProviderInfo::default()
+                },
+                RemoteCompactionSupport::Unsupported,
+            ),
         ];
 
         for (provider_info, expected) in cases {
             let provider = create_model_provider(provider_info, /*auth_manager*/ None);
             assert_eq!(provider.capabilities().remote_compaction, expected);
         }
+    }
+
+    #[test]
+    fn chat_provider_disables_hosted_web_search() {
+        let provider = create_model_provider(
+            ModelProviderInfo {
+                name: "NVIDIA NIM".to_string(),
+                base_url: Some("https://integrate.api.nvidia.com/v1".to_string()),
+                wire_api: WireApi::Chat,
+                ..ModelProviderInfo::default()
+            },
+            /*auth_manager*/ None,
+        );
+
+        assert_eq!(
+            provider.capabilities(),
+            ProviderCapabilities {
+                web_search: false,
+                ..ProviderCapabilities::default()
+            }
+        );
     }
 
     #[test]
