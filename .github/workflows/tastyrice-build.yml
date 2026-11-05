@@ -1,0 +1,111 @@
+# Fork-only: builds the tastyrice codex binary on GitHub instead of the production host.
+# Every push to `tastyrice` builds a release binary in rust:1.95-bookworm (same glibc as the
+# node:24-slim agent image), runs the tests of the crates this fork changes, and publishes the
+# stripped binary as release `tastyrice-<short sha>`. my-blog's scripts/agent-sandbox/codex-fetch.sh
+# downloads it, checks the sha256 and builds the agent image.
+name: tastyrice-build
+
+on:
+  push:
+    branches: [tastyrice]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tastyrice-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_IMAGE: rust:1.95-bookworm
+  # Same profile as the production build: thin LTO needs more memory than a runner has.
+  CARGO_ENV: >-
+    -e CARGO_NET_GIT_FETCH_WITH_CLI=true -e CARGO_INCREMENTAL=0
+    -e CARGO_PROFILE_RELEASE_LTO=false -e CARGO_PROFILE_RELEASE_DEBUG=0
+    -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 -e CARGO_TARGET_DIR=/target -e RUSTUP_TOOLCHAIN=1.95.0
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          docker image prune -af >/dev/null
+          df -h /
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/cargo-registry
+            ~/cargo-git
+            ~/target
+          key: release-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: release-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
+      - name: Build codex
+        run: ./.github/tastyrice/in-rust-container.sh "cargo build --release --locked -p codex-cli --bin codex"
+      - name: Package
+        run: |
+          mkdir dist
+          cp ~/target/release/codex dist/codex
+          strip dist/codex
+          ./dist/codex --version
+          tar -C dist -czf codex-x86_64-unknown-linux-gnu.tar.gz codex
+          sha256sum codex-x86_64-unknown-linux-gnu.tar.gz > codex-x86_64-unknown-linux-gnu.tar.gz.sha256
+          df -h /
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex
+          path: codex-x86_64-unknown-linux-gnu.tar.gz*
+          retention-days: 7
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          docker image prune -af >/dev/null
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/cargo-registry
+            ~/cargo-git
+            ~/target
+          key: test-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: test-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
+      # Crates this fork changes. Without debug assertions codex refuses to put its helper binaries
+      # under the temp dir that the integration tests use as CODEX_HOME.
+      - name: Test changed crates
+        run: |
+          ./.github/tastyrice/in-rust-container.sh "export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
+            cargo test --release --locked -p codex-api -p codex-config -p codex-http-client -p codex-login \
+              -p codex-model-provider -p codex-model-provider-info -p codex-models-manager -p codex-protocol
+            cargo test --release --locked -p codex-core --lib unified_exec
+            cargo test --release --locked -p codex-core --test all suite::unified_exec"
+
+  release:
+    needs: [build, test]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="tastyrice-${GITHUB_SHA::12}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" codex-x86_64-unknown-linux-gnu.tar.gz* --clobber
+          else
+            gh release create "$tag" codex-x86_64-unknown-linux-gnu.tar.gz* --target "$GITHUB_SHA" \
+              --prerelease --title "$tag" --notes "tastyrice build of ${GITHUB_SHA}"
+          fi
