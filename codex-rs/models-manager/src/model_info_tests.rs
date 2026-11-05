@@ -275,3 +275,11 @@ fn model_context_window_uses_model_value_without_override() {
 
     assert_eq!(updated, model);
 }
+
+#[test]
+fn fallback_model_offers_apply_patch() {
+    assert_eq!(
+        model_info_from_slug("third-party/unknown").apply_patch_tool_type,
+        Some(codex_protocol::openai_models::ApplyPatchToolType::Freeform)
+    );
+}
