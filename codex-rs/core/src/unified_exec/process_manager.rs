@@ -768,6 +768,11 @@ impl UnifiedExecProcessManager {
         } else {
             // Short-lived command: emit the completed command item immediately
             // using the same helper as the background watcher.
+            // Like the background watcher, wait until every output delta is
+            // sent, so clients never see deltas after the item completed. The
+            // process has exited, so the streaming task finishes within its
+            // trailing-output grace.
+            process.output_drained_notify().notified().await;
             let finish_result = finish_deferred_network_approval_after_process_exit_for_session(
                 Some(&context.session),
                 deferred_network_approval.take(),
