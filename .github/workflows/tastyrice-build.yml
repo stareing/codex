@@ -85,8 +85,14 @@ jobs:
       # codex-model-provider runs single-threaded: its encrypted-secrets test fails when the `age`
       # scrypt work estimate (measured under parallel tests on a 4-core runner) exceeds its limit.
       # Every command runs; the step fails at the end if any of them failed.
+      # codex's own sandbox (bubblewrap) needs unprivileged user namespaces, which the runner's
+      # AppArmor policy and docker's default seccomp/AppArmor profiles deny; only this test container
+      # gets them.
       - name: Test changed crates
+        env:
+          DOCKER_EXTRA_ARGS: --security-opt seccomp=unconfined --security-opt apparmor=unconfined
         run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bash .github/tastyrice/in-rust-container.sh "export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
             failed=()
             run() { echo \"::group::\$*\"; cargo test --release --locked \"\$@\" || failed+=(\"\$*\"); echo ::endgroup::; }
