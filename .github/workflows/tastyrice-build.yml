@@ -45,7 +45,7 @@ jobs:
           key: release-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
           restore-keys: release-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
       - name: Build codex
-        run: ./.github/tastyrice/in-rust-container.sh "cargo build --release --locked -p codex-cli --bin codex"
+        run: bash .github/tastyrice/in-rust-container.sh "cargo build --release --locked -p codex-cli --bin codex"
       - name: Package
         run: |
           mkdir dist
@@ -82,7 +82,7 @@ jobs:
       # under the temp dir that the integration tests use as CODEX_HOME.
       - name: Test changed crates
         run: |
-          ./.github/tastyrice/in-rust-container.sh "export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
+          bash .github/tastyrice/in-rust-container.sh "export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
             cargo test --release --locked -p codex-api -p codex-config -p codex-http-client -p codex-login \
               -p codex-model-provider -p codex-model-provider-info -p codex-models-manager -p codex-protocol
             cargo test --release --locked -p codex-core --lib unified_exec
