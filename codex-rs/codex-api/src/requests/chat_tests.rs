@@ -348,13 +348,21 @@ fn namespace_without_trailing_delimiter_is_joined_with_delimiter() {
         }]
     }]);
     let input = vec![
-        message("user", vec![ContentItem::InputText { text: "hi".to_string() }]),
+        message(
+            "user",
+            vec![ContentItem::InputText {
+                text: "hi".to_string(),
+            }],
+        ),
         function_call("call_1", "shout", Some("mcp__echo"), "{}"),
     ];
 
     let actual = build_chat_request(&request(input, Some(tools))).expect("request converts");
 
-    assert_eq!(actual.body["tools"][0]["function"]["name"], json!("mcp__echo__shout"));
+    assert_eq!(
+        actual.body["tools"][0]["function"]["name"],
+        json!("mcp__echo__shout")
+    );
     assert_eq!(
         actual.body["messages"][2]["tool_calls"][0]["function"]["name"],
         json!("mcp__echo__shout")
@@ -369,5 +377,138 @@ fn namespace_without_trailing_delimiter_is_joined_with_delimiter() {
                 kind: ChatToolKind::Function,
             },
         )])
+    );
+}
+
+/// Chat providers reject function names outside `^[a-zA-Z0-9_-]{1,64}$`.
+fn assert_provider_safe(name: &str) {
+    assert!(name.len() <= 64, "`{name}` is {} bytes", name.len());
+    assert!(
+        !name.is_empty()
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'),
+        "`{name}` has characters chat providers reject"
+    );
+}
+
+fn namespace_tool(namespace: &str, names: &[&str]) -> Value {
+    json!([{
+        "type": "namespace",
+        "name": namespace,
+        "description": "MCP server.",
+        "tools": names.iter().map(|name| json!({
+            "type": "function",
+            "name": name,
+            "description": "Tool.",
+            "strict": false,
+            "parameters": {"type": "object", "properties": {}}
+        })).collect::<Vec<_>>()
+    }])
+}
+
+#[test]
+fn long_namespaced_tool_name_fits_chat_limit_and_maps_back() {
+    // Regression: upstream MCP naming caps names at 128 bytes (Responses API
+    // limit); flattened as-is they exceeded the 64-byte chat function limit.
+    let namespace = format!("mcp__{}", "s".repeat(32));
+    let tool = format!("create_{}", "x".repeat(80));
+    let tools = namespace_tool(&namespace, &[&tool]);
+    let input = vec![
+        message(
+            "user",
+            vec![ContentItem::InputText {
+                text: "hi".to_string(),
+            }],
+        ),
+        function_call("call_1", &tool, Some(&namespace), "{}"),
+    ];
+
+    let actual = build_chat_request(&request(input, Some(tools))).expect("request converts");
+
+    let wire_name = actual.body["tools"][0]["function"]["name"]
+        .as_str()
+        .expect("tool name")
+        .to_string();
+    assert_provider_safe(&wire_name);
+    assert!(wire_name.starts_with(&format!("{namespace}__create_")));
+    assert_eq!(
+        actual.body["messages"][2]["tool_calls"][0]["function"]["name"],
+        json!(wire_name),
+        "history must use the same wire name the tool was declared with"
+    );
+    assert_eq!(
+        actual.tool_index.resolve(&wire_name),
+        ChatToolTarget {
+            namespace: Some(namespace),
+            name: tool,
+            kind: ChatToolKind::Function,
+        }
+    );
+}
+
+#[test]
+fn long_tool_names_with_shared_prefix_stay_distinct() {
+    let namespace = "mcp__docs";
+    let shared = "a".repeat(100);
+    let first = format!("{shared}_one");
+    let second = format!("{shared}_two");
+    let tools = namespace_tool(namespace, &[&first, &second]);
+
+    let actual = build_chat_request(&request(Vec::new(), Some(tools))).expect("request converts");
+
+    let first_wire = actual.body["tools"][0]["function"]["name"]
+        .as_str()
+        .expect("name");
+    let second_wire = actual.body["tools"][1]["function"]["name"]
+        .as_str()
+        .expect("name");
+    assert_provider_safe(first_wire);
+    assert_provider_safe(second_wire);
+    assert_ne!(first_wire, second_wire);
+    assert_eq!(actual.tool_index.resolve(first_wire).name, first);
+    assert_eq!(actual.tool_index.resolve(second_wire).name, second);
+}
+
+#[test]
+fn invalid_characters_are_replaced_and_names_stay_distinct() {
+    let tools = json!([
+        {"type": "function", "name": "read.file", "description": "", "parameters": {"type": "object"}},
+        {"type": "function", "name": "read file", "description": "", "parameters": {"type": "object"}}
+    ]);
+
+    let actual = build_chat_request(&request(Vec::new(), Some(tools))).expect("request converts");
+
+    let dotted = actual.body["tools"][0]["function"]["name"]
+        .as_str()
+        .expect("name");
+    let spaced = actual.body["tools"][1]["function"]["name"]
+        .as_str()
+        .expect("name");
+    assert_provider_safe(dotted);
+    assert_provider_safe(spaced);
+    assert_ne!(dotted, spaced);
+    assert_eq!(
+        actual.tool_index.resolve(dotted),
+        ChatToolTarget {
+            namespace: None,
+            name: "read.file".to_string(),
+            kind: ChatToolKind::Function,
+        }
+    );
+    assert_eq!(actual.tool_index.resolve(spaced).name, "read file");
+}
+
+#[test]
+fn provider_safe_names_are_unchanged() {
+    let max = "m".repeat(64);
+    assert_eq!(chat_tool_name(None, &max), max);
+    assert_eq!(
+        chat_tool_name(Some("mcp__echo"), "shout-loud"),
+        "mcp__echo__shout-loud"
+    );
+    assert_eq!(
+        chat_tool_name(Some("mcp__docs__"), "search"),
+        "mcp__docs__search"
     );
 }
