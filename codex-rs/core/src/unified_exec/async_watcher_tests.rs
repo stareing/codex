@@ -190,6 +190,49 @@ async fn streaming_output_preserves_multibyte_characters_across_chunks() -> anyh
 }
 
 #[tokio::test]
+async fn streaming_output_emits_output_written_before_the_watcher_started() -> anyhow::Result<()> {
+    // A short command can finish while the begin event is still being sent;
+    // its output must still reach clients as deltas, not only as the final transcript.
+    let StreamingOutputHarness {
+        process,
+        stdout_tx,
+        exit_tx,
+        rx_event,
+        context,
+        ..
+    } = streaming_output_harness().await?;
+    let collected = process.output_handles().output_notify.notified();
+    tokio::pin!(collected);
+    collected.as_mut().enable();
+    stdout_tx.send(b"early\n".to_vec())?;
+    collected.await;
+    drop(stdout_tx);
+    exit_tx.send(0).expect("send exit");
+
+    let output_drained = process.output_drained_notify();
+    let drained = output_drained.notified();
+    tokio::pin!(drained);
+    start_streaming_output(&process, &context);
+    (&mut drained).await;
+
+    let event = rx_event
+        .try_recv()
+        .expect("output written before the watcher started must still stream as a delta");
+    let EventMsg::ExecCommandOutputDelta(delta) = event.msg else {
+        panic!("expected ExecCommandOutputDelta");
+    };
+    assert_eq!(
+        delta,
+        ExecCommandOutputDeltaEvent {
+            call_id: "streaming-output-test".to_string(),
+            stream: ExecOutputStream::Stdout,
+            chunk: b"early\n".to_vec(),
+        }
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn streaming_output_finishes_on_close_without_waiting_for_grace() -> anyhow::Result<()> {
     let StreamingOutputHarness {
         process,
