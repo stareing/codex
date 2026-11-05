@@ -1,5 +1,7 @@
 use super::*;
 use crate::requests::chat_tools::ChatToolTarget;
+use crate::requests::chat_tools::chat_tool_name;
+use crate::requests::chat_tools::convert_tools;
 use codex_client::TransportError;
 use futures::TryStreamExt;
 use pretty_assertions::assert_eq;
@@ -354,4 +356,42 @@ async fn length_finish_reports_incomplete_response() {
             ),
         ]
     );
+}
+
+#[tokio::test]
+async fn long_mcp_tool_call_maps_back_to_original_tool() {
+    // Round trip: declared wire name -> model call -> original namespace/name.
+    let namespace = format!("mcp__{}", "s".repeat(32));
+    let tool = format!("create_{}", "x".repeat(80));
+    let tools = convert_tools(&[json!({
+        "type": "namespace",
+        "name": namespace,
+        "tools": [{"type": "function", "name": tool, "parameters": {"type": "object"}}]
+    })]);
+    let wire_name = chat_tool_name(Some(&namespace), &tool);
+    assert!(wire_name.len() <= 64);
+    assert_eq!(tools.tools[0]["function"]["name"], json!(wire_name));
+    let body = sse_body(
+        &[
+            json!({"id": "chatcmpl-9", "choices": [{"index": 0, "delta": {"tool_calls": [
+            {"index": 0, "id": "call_long", "function": {"name": wire_name, "arguments": "{}"}}
+        ]}, "finish_reason": "tool_calls"}]}),
+        ],
+        /*done*/ false,
+    );
+
+    let events = run(body, tools.index).await;
+
+    let call = events
+        .iter()
+        .find_map(|event| match event {
+            Ok(ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+                name,
+                namespace,
+                ..
+            })) => Some((name.clone(), namespace.clone())),
+            _ => None,
+        })
+        .expect("function call emitted");
+    assert_eq!(call, (tool, Some(namespace)));
 }
