@@ -1124,6 +1124,63 @@ async fn unified_exec_emits_output_delta_for_exec_command() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unified_exec_streams_short_lived_output_before_the_end_event() -> Result<()> {
+    // A command that exits inside the initial yield takes the short-lived path:
+    // its output must still arrive as deltas, all of them before the end event.
+    skip_if_target_windows!(Ok(()), "uses a POSIX-only command fixture");
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let mut builder = test_codex();
+    let test = builder.build_with_auto_env(&server).await?;
+
+    let call_id = "uexec-short-delta";
+    let args = json!({
+        "cmd": "printf 'QUICK-OUT'",
+        "yield_time_ms": 5_000,
+    });
+    let responses = vec![
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+            ev_completed("resp-1"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-2"),
+            ev_assistant_message("msg-1", "finished"),
+            ev_completed("resp-2"),
+        ]),
+    ];
+    mount_sse_sequence(&server, responses).await;
+
+    submit_unified_exec_turn(&test, "short delta", PermissionProfile::Disabled).await?;
+
+    let mut deltas = Vec::new();
+    let mut deltas_after_end = 0;
+    let mut end_seen = false;
+    loop {
+        match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::ExecCommandOutputDelta(event) if event.call_id == call_id => {
+                if end_seen {
+                    deltas_after_end += 1;
+                }
+                deltas.push(event.chunk);
+            }
+            EventMsg::ExecCommandEnd(event) if event.call_id == call_id => end_seen = true,
+            EventMsg::TurnComplete(_) => break,
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        (deltas.concat(), end_seen, deltas_after_end),
+        (b"QUICK-OUT".to_vec(), true, 0)
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unified_exec_full_lifecycle_with_background_end_event() -> Result<()> {
     // TODO(anp): Remove after unified-exec fixtures use target-native commands.
     skip_if_target_windows!(Ok(()), "uses a POSIX-only command fixture");
