@@ -2499,6 +2499,7 @@ dependencies = [
  "app_test_support",
  "assert_cmd",
  "assert_matches",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "clap_complete",
@@ -2507,6 +2508,7 @@ dependencies = [
  "codex-app-server-daemon",
  "codex-app-server-protocol",
  "codex-app-server-test-client",
+ "codex-app-server-transport",
  "codex-arg0",
  "codex-aws-auth",
  "codex-build-info",
@@ -2558,6 +2560,7 @@ dependencies = [
  "crossterm",
  "flate2",
  "futures",
+ "gethostname",
  "http 1.4.0",
  "insta",
  "jsonwebtoken",
@@ -2566,7 +2569,10 @@ dependencies = [
  "owo-colors",
  "predicates",
  "pretty_assertions",
+ "qrcode",
+ "rand 0.9.3",
  "regex-lite",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2576,6 +2582,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tikv-jemallocator",
+ "tiny_http",
  "tokio",
  "tokio-tungstenite",
  "toml 0.9.11+spec-1.1.0",
@@ -2585,6 +2592,7 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "vt100",
+ "webbrowser",
  "which 8.0.0",
  "windows-sys 0.52.0",
  "wiremock",
@@ -12016,6 +12024,12 @@ checksum = "7186d3822593aa4393561d186d1393b3923e9d6163d3fbfd6e825e3e6cf3e6a8"
 dependencies = [
  "num-traits",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-error"

@@ -15,6 +15,7 @@ use std::ffi::OsString;
 use std::io;
 use std::io::ErrorKind;
 use std::io::Read;
+use std::path::Path;
 use std::path::PathBuf;
 use url::Host;
 use url::Url;
@@ -39,6 +40,17 @@ impl SiteRelay {
     /// `Ok(None)` when no variable is set; an error when only some are, or a value is invalid.
     pub fn from_env() -> io::Result<Option<Self>> {
         Self::from_lookup(|name| std::env::var_os(name))
+    }
+
+    /// The variables win; otherwise the account saved by `login` under `codex_home`, so a daemon
+    /// started without the launcher's environment still reaches the relay.
+    pub fn from_env_or_account(codex_home: &Path) -> io::Result<Option<Self>> {
+        if let Some(relay) = Self::from_env()? {
+            return Ok(Some(relay));
+        }
+        SiteAccount::load(codex_home)?
+            .map(|account| account.relay(codex_home))
+            .transpose()
     }
 
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> io::Result<Option<Self>> {
@@ -206,3 +218,103 @@ impl AuthProvider for SiteRelayAuthProvider {
 #[cfg(test)]
 #[path = "site_relay_tests.rs"]
 mod site_relay_tests;
+
+/// File names under `codex_home` written by `login` (the single definition of the signed-in state).
+pub const SITE_ACCOUNT_FILE: &str = "site-account.json";
+pub const SITE_ACCOUNT_TOKEN_FILE: &str = "site-account.token";
+const MAX_ACCOUNT_FILE_BYTES: u64 = 16 * 1024;
+
+/// The site account this computer is signed in to: the exchange response of the site's
+/// `/api/agent-devices/token/`, minus the token, which lives in its own owner-only file.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SiteAccount {
+    /// Site origin, e.g. `https://onigio.com`; the session link and API calls use it.
+    pub site_url: String,
+    pub relay_url: String,
+    pub account_id: String,
+    pub device_id: u64,
+    pub name: String,
+}
+
+impl SiteAccount {
+    pub fn token_path(codex_home: &Path) -> PathBuf {
+        codex_home.join(SITE_ACCOUNT_TOKEN_FILE)
+    }
+
+    /// `Ok(None)` when this computer has not signed in.
+    pub fn load(codex_home: &Path) -> io::Result<Option<Self>> {
+        let path = codex_home.join(SITE_ACCOUNT_FILE);
+        let file = match std::fs::File::open(&path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let mut raw = String::new();
+        file.take(MAX_ACCOUNT_FILE_BYTES).read_to_string(&mut raw)?;
+        serde_json::from_str(&raw).map(Some).map_err(|err| {
+            io::Error::new(
+                ErrorKind::InvalidData,
+                format!("{} is not a valid site account: {err}", path.display()),
+            )
+        })
+    }
+
+    /// Writes the token (owner-only) first, then the account, so a half-written sign-in never
+    /// looks signed in.
+    pub fn save(&self, codex_home: &Path, token: &str) -> io::Result<()> {
+        std::fs::create_dir_all(codex_home)?;
+        write_private(&Self::token_path(codex_home), token.as_bytes())?;
+        let json = serde_json::to_vec_pretty(self).map_err(io::Error::other)?;
+        write_private(&codex_home.join(SITE_ACCOUNT_FILE), &json)
+    }
+
+    /// Forgets the sign-in; missing files are fine.
+    pub fn remove(codex_home: &Path) -> io::Result<()> {
+        for path in [
+            codex_home.join(SITE_ACCOUNT_FILE),
+            Self::token_path(codex_home),
+        ] {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn relay(&self, codex_home: &Path) -> io::Result<SiteRelay> {
+        SiteRelay::new(
+            &self.relay_url,
+            Self::token_path(codex_home),
+            &self.account_id,
+        )
+    }
+
+    /// Where a phone or browser opens this computer's sessions.
+    pub fn session_url(&self) -> String {
+        format!(
+            "{}/ask?mode=agent&device={}",
+            self.site_url.trim_end_matches('/'),
+            self.device_id
+        )
+    }
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    {
+        use std::io::Write;
+        let mut file = options.open(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
+}

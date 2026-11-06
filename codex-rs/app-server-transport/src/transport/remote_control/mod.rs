@@ -14,6 +14,7 @@ mod server_api;
 mod site_relay;
 mod websocket;
 
+pub use self::site_relay::SiteAccount;
 pub use self::site_relay::SiteRelay;
 
 use self::auth::load_remote_control_auth;

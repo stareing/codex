@@ -66,6 +66,13 @@ pub(crate) async fn run(
     arg0_paths: Arg0DispatchPaths,
     root_config_overrides: CliConfigOverrides,
 ) -> anyhow::Result<()> {
+    if matches!(
+        command.subcommand,
+        None | Some(RemoteControlSubcommand::Start)
+    ) && !command.json
+    {
+        crate::site_login::ensure_signed_in().await?;
+    }
     match command.subcommand {
         None => {
             print_remote_control_progress(
@@ -299,6 +306,7 @@ fn print_remote_control_start_output(
     for line in daemon_app_server_human_lines(&output.daemon) {
         println!("{line}");
     }
+    crate::site_login::print_session_link();
     Ok(())
 }
 
@@ -319,6 +327,7 @@ fn print_foreground_ready_output(
     {
         println!("{line}");
     }
+    crate::site_login::print_session_link();
     Ok(())
 }
 

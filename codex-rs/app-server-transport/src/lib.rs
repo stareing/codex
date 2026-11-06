@@ -31,6 +31,7 @@ pub use transport::RemoteControlPolicy;
 pub use transport::RemoteControlStartConfig;
 pub use transport::RemoteControlStartupMode;
 pub use transport::RemoteControlUnavailable;
+pub use transport::SiteAccount;
 pub use transport::SiteRelay;
 pub use transport::TransportEvent;
 pub use transport::acquire_app_server_startup_lock;
