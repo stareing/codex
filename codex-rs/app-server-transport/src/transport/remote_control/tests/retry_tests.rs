@@ -52,6 +52,7 @@ async fn assert_overload_retry_after(status: &str, reject_enrollment: bool) {
             remote_control_url: remote_control_url_for_listener(&listener),
             installation_id: TEST_INSTALLATION_ID.to_string(),
             policy: RemoteControlPolicy::Allowed,
+            site_relay: None,
         },
         Some(remote_control_state_runtime(&codex_home).await),
         auth_manager.clone(),

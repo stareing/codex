@@ -39,6 +39,7 @@ use crate::transport::DaemonShutdownAccess;
 use crate::transport::OutboundConnectionState;
 use crate::transport::RemoteControlPolicy;
 use crate::transport::RemoteControlStartConfig;
+use crate::transport::SiteRelay;
 use crate::transport::TransportEvent;
 use crate::transport::acquire_app_server_startup_lock;
 use crate::transport::app_server_startup_lock_path;
@@ -845,11 +846,17 @@ pub async fn run_main_with_transport_options(
         ));
     }
 
+    // Onigio fork: the desktop client names its relay and device token through the environment.
+    let site_relay = SiteRelay::from_env()?;
     let (remote_control_accept_handle, remote_control_handle) = start_remote_control(
         RemoteControlStartConfig {
-            remote_control_url: config.chatgpt_base_url.clone(),
+            remote_control_url: site_relay.as_ref().map_or_else(
+                || config.chatgpt_base_url.clone(),
+                |site_relay| site_relay.url().to_string(),
+            ),
             installation_id: installation_id.clone(),
             policy: remote_control_policy,
+            site_relay,
         },
         state_db.clone(),
         auth_manager.clone(),

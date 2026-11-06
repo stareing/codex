@@ -2,6 +2,8 @@
 //! Replacement happens before cleanup; retired sessions cannot publish into their replacements.
 
 use super::auth::RemoteControlAuth;
+use super::protocol::normalize_remote_control_url_trusting;
+use super::site_relay::SiteRelay;
 use super::*;
 use futures::FutureExt;
 use std::panic::AssertUnwindSafe;
@@ -21,6 +23,7 @@ pub(super) struct RemoteControl {
     config: RemoteControlStartConfig,
     state_db: Option<Arc<StateRuntime>>,
     auth_manager: Arc<AuthManager>,
+    site_relay: Option<Arc<SiteRelay>>,
     transport_event_tx: mpsc::Sender<TransportEvent>,
     shutdown: CancellationToken,
     tasks: TaskTracker,
@@ -44,7 +47,10 @@ impl RemoteControl {
         {
             return current.session.clone();
         }
-        let (auth, authenticated) = RemoteControlAuth::capture(self.auth_manager.clone());
+        let (auth, authenticated) = RemoteControlAuth::capture_with_site_relay(
+            self.auth_manager.clone(),
+            self.site_relay.clone(),
+        );
         let desired = match current.take() {
             Some(previous) => {
                 previous.session.shutdown_token.cancel();
@@ -279,7 +285,10 @@ pub async fn start_remote_control(
                 RemoteControlStartupMode::ResolvePersisted => RemoteControlDesiredState::Unknown,
                 RemoteControlStartupMode::DisabledEphemeral => RemoteControlDesiredState::Disabled,
                 RemoteControlStartupMode::EnabledEphemeral => {
-                    normalize_remote_control_url(&config.remote_control_url)?;
+                    normalize_remote_control_url_trusting(
+                        &config.remote_control_url,
+                        config.site_relay.as_ref(),
+                    )?;
                     RemoteControlDesiredState::Enabled {
                         persistence_preference: None,
                     }
@@ -292,10 +301,12 @@ pub async fn start_remote_control(
         installation_id: config.installation_id.clone(),
         environment_id: None,
     });
+    let site_relay = config.site_relay.clone().map(Arc::new);
     let inner = Arc::new(RemoteControl {
         config,
         state_db,
         auth_manager,
+        site_relay,
         transport_event_tx,
         shutdown: shutdown_token,
         tasks: TaskTracker::new(),

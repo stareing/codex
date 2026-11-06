@@ -1,3 +1,4 @@
+use super::site_relay::SiteRelay;
 use crate::outgoing_message::OutgoingMessage;
 use codex_app_server_protocol::JSONRPCMessage;
 use serde::Deserialize;
@@ -209,10 +210,20 @@ fn is_localhost(host: &Option<Host<&str>>) -> bool {
     }
 }
 
+#[cfg(test)]
 pub(super) fn normalize_remote_control_url(
     remote_control_url: &str,
 ) -> io::Result<RemoteControlTarget> {
-    let remote_control_url = normalize_remote_control_base_url(remote_control_url)?;
+    normalize_remote_control_url_trusting(remote_control_url, /*site_relay*/ None)
+}
+
+/// Like [`normalize_remote_control_url`], also accepting HTTPS to the configured site relay's host.
+pub(super) fn normalize_remote_control_url_trusting(
+    remote_control_url: &str,
+    site_relay: Option<&SiteRelay>,
+) -> io::Result<RemoteControlTarget> {
+    let remote_control_url =
+        normalize_remote_control_base_url_trusting(remote_control_url, site_relay)?;
     let map_url_parse_error = |err: url::ParseError| -> io::Error {
         io::Error::new(
             ErrorKind::InvalidInput,
@@ -257,7 +268,10 @@ pub(super) fn normalize_remote_control_url(
     })
 }
 
-pub(super) fn normalize_remote_control_base_url(remote_control_url: &str) -> io::Result<Url> {
+pub(super) fn normalize_remote_control_base_url_trusting(
+    remote_control_url: &str,
+    site_relay: Option<&SiteRelay>,
+) -> io::Result<Url> {
     let map_url_parse_error = |err: url::ParseError| -> io::Error {
         io::Error::new(
             ErrorKind::InvalidInput,
@@ -281,7 +295,10 @@ pub(super) fn normalize_remote_control_base_url(remote_control_url: &str) -> io:
 
     let host = remote_control_url.host();
     match remote_control_url.scheme() {
-        "https" if is_localhost(&host) || is_allowed_remote_control_chatgpt_host(&host) => {}
+        "https"
+            if is_localhost(&host)
+                || is_allowed_remote_control_chatgpt_host(&host)
+                || site_relay.is_some_and(|site_relay| site_relay.trusts(&host)) => {}
         "http" if is_localhost(&host) => {}
         _ => return Err(map_scheme_error(())),
     }

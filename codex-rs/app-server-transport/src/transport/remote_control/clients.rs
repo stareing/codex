@@ -5,7 +5,7 @@ use super::auth::recover_remote_control_auth;
 use super::auth::request_client;
 use super::enroll::format_headers;
 use super::enroll::preview_remote_control_response_body;
-use super::protocol::normalize_remote_control_base_url;
+use super::protocol::normalize_remote_control_base_url_trusting;
 use axum::http::HeaderMap;
 use codex_app_server_protocol::RemoteControlClient;
 use codex_app_server_protocol::RemoteControlClientsListOrder;
@@ -85,7 +85,7 @@ pub(super) async fn list_remote_control_clients(
             "remote control client list limit must be between 1 and 100",
         ));
     }
-    let url = environment_clients_url(remote_control_url, &params.environment_id)?;
+    let url = environment_clients_url(remote_control_url, auth_manager, &params.environment_id)?;
     let response = send_client_management_request(
         auth_manager,
         ClientManagementRequest::List {
@@ -137,7 +137,8 @@ pub(super) async fn revoke_remote_control_client(
             "remote control client revoke requires clientId",
         ));
     }
-    let mut url = environment_clients_url(remote_control_url, &params.environment_id)?;
+    let mut url =
+        environment_clients_url(remote_control_url, auth_manager, &params.environment_id)?;
     url.path_segments_mut()
         .map_err(|()| {
             io::Error::new(
@@ -265,10 +266,15 @@ fn ensure_success_response(
     ))
 }
 
-fn environment_clients_url(remote_control_url: &str, environment_id: &str) -> io::Result<Url> {
-    let mut url = normalize_remote_control_base_url(remote_control_url)?
-        .join("wham/remote/control/environments")
-        .map_err(io::Error::other)?;
+fn environment_clients_url(
+    remote_control_url: &str,
+    auth_manager: &RemoteControlAuth,
+    environment_id: &str,
+) -> io::Result<Url> {
+    let mut url =
+        normalize_remote_control_base_url_trusting(remote_control_url, auth_manager.site_relay())?
+            .join("wham/remote/control/environments")
+            .map_err(io::Error::other)?;
     url.path_segments_mut()
         .map_err(|()| {
             io::Error::new(
