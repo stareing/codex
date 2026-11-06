@@ -237,7 +237,7 @@ pub(crate) fn first_line(text: &str) -> String {
 }
 
 /// Reads a line on the terminal without echoing it.
-fn read_hidden_line(prompt: &str) -> io::Result<String> {
+pub(crate) fn read_hidden_line(prompt: &str) -> io::Result<String> {
     use crossterm::event::Event;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEventKind;
