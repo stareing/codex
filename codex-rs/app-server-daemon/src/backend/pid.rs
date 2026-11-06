@@ -402,6 +402,19 @@ impl PidBackend {
     }
 
     #[cfg(any(unix, windows))]
+    /// Folders saved by `remote-control start --allow`, for the app-server child (every launch,
+    /// including restarts and updates, so they survive the CLI that saved them).
+    fn remote_allowed_roots_env(&self) -> Result<Option<std::ffi::OsString>> {
+        let Some(state_dir) = self.pid_file.parent() else {
+            return Ok(None);
+        };
+        codex_app_server_transport::read_allowed_roots_file(state_dir)
+            .context("failed to read the remote-control allowed folders")?
+            .map(|roots| codex_app_server_transport::encode_allowed_roots(&roots))
+            .transpose()
+            .context("remote-control allowed folders cannot be passed to the app server")
+    }
+
     fn command_env(&self) -> Option<(&'static str, &'static str)> {
         match self.command_kind {
             PidCommandKind::AppServer {

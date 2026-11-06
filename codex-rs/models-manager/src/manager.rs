@@ -263,6 +263,8 @@ pub struct OpenAiModelsManager {
     endpoint_client: SharedModelsEndpointClient,
     api_key_model_discovery_enabled: AtomicBool,
     auth_manager: Option<Arc<AuthManager>>,
+    /// Set by [`OpenAiModelsManager::with_own_catalog`]: replaces the bundled upstream catalog.
+    own_catalog_fallback: Option<Vec<ModelInfo>>,
 }
 
 /// Static model manager backed by an authoritative in-process catalog.
@@ -328,7 +330,31 @@ impl OpenAiModelsManager {
             api_key_model_discovery_enabled: AtomicBool::new(false),
             endpoint_client,
             auth_manager,
+            own_catalog_fallback: None,
         }
+    }
+
+    /// For a provider that serves its own catalog (`model_catalog_url`): its list is always
+    /// authoritative and fetched without the API-key discovery feature, and `fallback` is shown
+    /// instead of the bundled upstream presets until (or whenever) that list cannot be read.
+    #[must_use]
+    pub fn with_own_catalog(mut self, fallback: Vec<ModelInfo>) -> Self {
+        self.remote_models.get_mut().models = fallback.clone();
+        self.own_catalog_fallback = Some(fallback);
+        self
+    }
+
+    /// The catalog used before or without a usable remote one.
+    fn default_models(&self) -> Vec<ModelInfo> {
+        match &self.own_catalog_fallback {
+            Some(fallback) => fallback.clone(),
+            None => load_remote_models_from_file().unwrap_or_default(),
+        }
+    }
+
+    fn api_key_model_discovery_enabled(&self) -> bool {
+        self.own_catalog_fallback.is_some()
+            || self.api_key_model_discovery_enabled.load(Ordering::SeqCst)
     }
 }
 
@@ -396,7 +422,7 @@ impl ModelsManager for OpenAiModelsManager {
             if entry.identity.is_some() && entry.identity == self.endpoint_client.identity() {
                 entry.models.clone()
             } else {
-                load_remote_models_from_file().unwrap_or_default()
+                self.default_models()
             }
         })
     }
@@ -407,7 +433,7 @@ impl ModelsManager for OpenAiModelsManager {
             if entry.identity.is_some() && entry.identity == self.endpoint_client.identity() {
                 entry.models.clone()
             } else {
-                load_remote_models_from_file().unwrap_or_default()
+                self.default_models()
             },
         )
     }
@@ -488,7 +514,7 @@ impl OpenAiModelsManager {
         if self.uses_api_key_auth()
             && !self.endpoint_client.has_command_auth()
             && (!self.endpoint_client.supports_api_key_models()
-                || !self.api_key_model_discovery_enabled.load(Ordering::SeqCst))
+                || !self.api_key_model_discovery_enabled())
         {
             return Ok(());
         }
@@ -586,7 +612,7 @@ impl OpenAiModelsManager {
                         .is_some_and(AuthMode::has_chatgpt_account)
                 }));
         if !remote_only {
-            let mut models = load_remote_models_from_file().unwrap_or_default();
+            let mut models = self.default_models();
             for model in entry.models {
                 if let Some(index) = models
                     .iter()

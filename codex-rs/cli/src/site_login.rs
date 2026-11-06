@@ -15,12 +15,17 @@ use anyhow::Context;
 use anyhow::bail;
 use base64::Engine;
 use codex_app_server_transport::SiteAccount;
+use codex_utils_cli::CliConfigOverrides;
 use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
 use rand::Rng;
 use sha2::Digest;
 use sha2::Sha256;
 use url::Url;
+
+use crate::site_password::PasswordArgs;
+use crate::site_password::PasswordOutcome;
+use crate::site_password::SignInError;
 
 /// The site this build signs in to unless `--site` or [`SITE_URL_ENV_VAR`] says otherwise.
 pub const DEFAULT_SITE_URL: &str = "https://onigio.com";
@@ -67,7 +72,7 @@ fn challenge_of(verifier: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
-fn platform() -> &'static str {
+pub(crate) fn platform() -> &'static str {
     match std::env::consts::OS {
         "windows" => "windows",
         "macos" => "macos",
@@ -75,7 +80,7 @@ fn platform() -> &'static str {
     }
 }
 
-fn device_name() -> String {
+pub(crate) fn device_name() -> String {
     let name = gethostname::gethostname()
         .to_string_lossy()
         .trim()
@@ -144,10 +149,11 @@ fn page(body: &str) -> tiny_http::Response<io::Cursor<Vec<u8>>> {
          <title>Onigio</title><body style=\"font:16px system-ui;margin:20vh auto;max-width:28em;text-align:center\">\
          <p>{body}</p></body>"
     );
-    let content_type =
-        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
-            .expect("static header");
-    tiny_http::Response::from_string(html).with_header(content_type)
+    let response = tiny_http::Response::from_string(html);
+    match tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]) {
+        Ok(content_type) => response.with_header(content_type),
+        Err(()) => response,
+    }
 }
 
 /// Waits for the browser to come back; answers every request so the tab never hangs.
@@ -178,22 +184,25 @@ fn wait_for_code(server: &tiny_http::Server, state: &str) -> anyhow::Result<Stri
     }
 }
 
+/// The site's device-token payload (browser exchange and password sign-in alike).
 #[derive(serde::Deserialize)]
-struct Exchanged {
+pub(crate) struct Exchanged {
     device_id: u64,
     token: String,
     account_id: String,
     relay_url: String,
     name: String,
+    #[serde(default)]
+    model: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
-struct Refusal {
-    code: Option<String>,
-    detail: Option<String>,
+pub(crate) struct Refusal {
+    pub(crate) code: Option<String>,
+    pub(crate) detail: Option<String>,
 }
 
-fn http_client() -> anyhow::Result<reqwest::Client> {
+pub(crate) fn http_client() -> anyhow::Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(HTTP_TIMEOUT)
         .build()
@@ -259,12 +268,22 @@ async fn login_with_opener(
         .await
         .context("sign-in listener stopped")??;
     let exchanged = exchange(site, &code, &verifier).await?;
+    save_exchanged(codex_home, site, exchanged)
+}
+
+/// Saves a device-token payload as this computer's sign-in (replacing an earlier one).
+pub(crate) fn save_exchanged(
+    codex_home: &Path,
+    site: &str,
+    exchanged: Exchanged,
+) -> anyhow::Result<SiteAccount> {
     let account = SiteAccount {
         site_url: site.to_string(),
         relay_url: exchanged.relay_url,
         account_id: exchanged.account_id,
         device_id: exchanged.device_id,
         name: exchanged.name,
+        model: exchanged.model.filter(|model| !model.trim().is_empty()),
     };
     account
         .relay(codex_home)
@@ -322,37 +341,122 @@ pub fn session_banner(account: &SiteAccount) -> String {
     }
 }
 
-fn codex_home() -> anyhow::Result<std::path::PathBuf> {
+pub(crate) fn codex_home() -> anyhow::Result<std::path::PathBuf> {
     Ok(codex_core::config::find_codex_home()
         .context("failed to resolve CODEX_HOME")?
         .as_path()
         .to_path_buf())
 }
 
-fn exit_on_error(result: anyhow::Result<()>) -> ! {
+/// `login` as parsed from the command line.
+#[derive(Debug, Default)]
+pub(crate) struct LoginRequest {
+    pub(crate) site: Option<String>,
+    /// Print exactly one JSON result line on stdout.
+    pub(crate) json: bool,
+    pub(crate) no_host_info: bool,
+    /// `Some` for the password flow, `None` for the browser.
+    pub(crate) password: Option<PasswordArgs>,
+    pub(crate) config_overrides: CliConfigOverrides,
+}
+
+/// Exit code of `login` when the site wants a second factor and none could be asked for.
+pub const EXIT_TWO_FACTOR_REQUIRED: i32 = 3;
+
+/// The single result line of `login --json`.
+pub(crate) fn login_json_line(result: &Result<PasswordOutcome, SignInError>) -> serde_json::Value {
     match result {
-        Ok(()) => std::process::exit(0),
+        Ok(PasswordOutcome::SignedIn(account)) => serde_json::json!({
+            "status": "signed_in",
+            "site": account.site_url,
+            "device_id": account.device_id,
+            "name": account.name,
+        }),
+        Ok(PasswordOutcome::TwoFactorRequired) => {
+            serde_json::json!({"status": "two_factor_required"})
+        }
+        Err(err) => serde_json::json!({
+            "status": "error",
+            "code": err.code,
+            "detail": err.message(),
+        }),
+    }
+}
+
+/// `login [--site URL] [--password …] [--json] [--no-host-info]`.
+pub(crate) async fn run_login(request: LoginRequest) -> ! {
+    let result = async {
+        let site = resolve_site_url(request.site.as_deref())
+            .map_err(|err| SignInError::new("invalid_site", format!("{err:#}")))?;
+        let home =
+            codex_home().map_err(|err| SignInError::new("local_error", format!("{err:#}")))?;
+        let outcome = match request.password {
+            Some(args) => crate::site_password::run(&home, &site, args).await?,
+            None => login(&home, &site)
+                .await
+                .map(PasswordOutcome::SignedIn)
+                .map_err(|err| SignInError::new("login_failed", format!("{err:#}")))?,
+        };
+        if matches!(outcome, PasswordOutcome::SignedIn(_)) {
+            crate::host_info::report_for_saved_account(
+                &home,
+                &request.config_overrides,
+                request.no_host_info,
+            )
+            .await;
+        }
+        Ok(outcome)
+    }
+    .await;
+    if request.json {
+        println!("{}", login_json_line(&result));
+    }
+    match result {
+        Ok(PasswordOutcome::SignedIn(account)) => {
+            if !request.json {
+                eprintln!(
+                    "Signed in. This computer is connected to {} as \"{}\".\nRun `remote-control` to use it from your phone or browser.",
+                    account.site_url, account.name
+                );
+            }
+            std::process::exit(0);
+        }
+        Ok(PasswordOutcome::TwoFactorRequired) => {
+            if !request.json {
+                eprintln!("A two-factor code is required; run again with --otp <CODE>.");
+            }
+            std::process::exit(EXIT_TWO_FACTOR_REQUIRED);
+        }
         Err(err) => {
-            eprintln!("Error: {err:#}");
+            if !request.json {
+                eprintln!("Error: {}", err.message());
+            }
             std::process::exit(1);
         }
     }
 }
 
-/// `login [--site URL]`.
-pub async fn run_login(site: Option<String>) -> ! {
-    exit_on_error(
-        async {
-            let site = resolve_site_url(site.as_deref())?;
-            let account = login(&codex_home()?, &site).await?;
-            eprintln!(
-                "Signed in. This computer is connected to {} as \"{}\".\nRun `remote-control` to use it from your phone or browser.",
-                account.site_url, account.name
-            );
-            Ok(())
-        }
-        .await,
-    )
+/// The `login status --json` object.
+pub(crate) fn status_json(account: Option<&SiteAccount>) -> serde_json::Value {
+    match account {
+        Some(account) => serde_json::json!({
+            "signed_in": true,
+            "site": account.site_url,
+            "device_id": account.device_id,
+            "name": account.name,
+            "session_url": account.session_url(),
+        }),
+        None => serde_json::json!({"signed_in": false}),
+    }
+}
+
+/// `login status --json`: one JSON line about the site sign-in; always exits 0.
+pub fn run_site_status_json() -> ! {
+    let account = codex_home()
+        .ok()
+        .and_then(|home| SiteAccount::load(&home).ok().flatten());
+    println!("{}", status_json(account.as_ref()));
+    std::process::exit(0);
 }
 
 /// `login status` when signed in to a site; `None` lets the caller fall back to upstream.

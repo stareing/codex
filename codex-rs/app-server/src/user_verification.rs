@@ -264,6 +264,10 @@ mod cancel_tests;
 mod test_support;
 
 #[cfg(test)]
+#[path = "remote_roots_dispatch_tests.rs"]
+mod remote_roots_dispatch_tests;
+
+#[cfg(test)]
 #[path = "user_verification_activation_tests.rs"]
 mod activation_tests;
 

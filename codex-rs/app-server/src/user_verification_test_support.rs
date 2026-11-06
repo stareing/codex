@@ -117,6 +117,15 @@ pub(super) struct Harness {
 
 impl Harness {
     pub(super) async fn new(origin: ConnectionOrigin, supported: fn() -> bool) -> Result<Self> {
+        Self::new_with_remote_roots(origin, supported, /*remote_roots*/ None).await
+    }
+
+    /// `remote_roots`: the remote-control allow-list (`None` = unrestricted).
+    pub(super) async fn new_with_remote_roots(
+        origin: ConnectionOrigin,
+        supported: fn() -> bool,
+        remote_roots: Option<Vec<std::path::PathBuf>>,
+    ) -> Result<Self> {
         let home = tempfile::tempdir()?;
         write_auth(home.path(), "first")?;
         let config = Arc::new(
@@ -148,6 +157,14 @@ impl Harness {
             Arg0DispatchPaths::default(),
             Arc::new(codex_config::NoopThreadConfigLoader),
         );
+        let remote_roots = match remote_roots {
+            Some(roots) => crate::remote_roots::RemoteRoots::new(
+                Some(roots),
+                config.cwd.to_path_buf(),
+                config.codex_home.to_path_buf(),
+            ),
+            None => crate::remote_roots::RemoteRoots::unrestricted(),
+        };
         let (sender, messages) = mpsc::channel(/*buffer*/ 16);
         let outgoing = Arc::new(OutgoingMessageSender::new(
             sender,
@@ -178,6 +195,7 @@ impl Harness {
             },
             remote_control_handle: None,
             plugin_startup_tasks: None,
+            remote_roots,
         }));
         Ok(Self {
             processor,

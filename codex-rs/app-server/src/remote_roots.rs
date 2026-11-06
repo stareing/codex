@@ -1,0 +1,336 @@
+//! Folder allow-list for remote-control connections.
+//!
+//! A phone or browser driving this computer through remote control may only work inside the folders
+//! the user allowed (`remote-control --allow <DIR>`, default: the folder it was started in). Every
+//! cwd or path a remote request names — and the default cwd it would get when it names none — must
+//! resolve inside one of them. Paths are resolved the way the request processors resolve them
+//! (relative to the server cwd), then canonicalized so `..` and symlinks cannot step outside; a
+//! path that does not exist yet is judged by its deepest existing ancestor and may not contain `..`
+//! below it.
+//!
+//! Policy when no roots were given (neither the runtime option nor
+//! `SITE_RELAY_ALLOWED_ROOTS`): unrestricted, as upstream. Our `remote-control` command always passes
+//! roots (foreground directly, daemon via the saved roots file), so this only covers launchers that
+//! run `app-server --remote-control` themselves and own that decision. A value that is set but names
+//! no usable folder refuses everything (fail closed).
+//!
+//! Local connections (stdio, in-process, websocket) are never checked.
+
+use std::path::Component;
+use std::path::Path;
+use std::path::PathBuf;
+
+use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::SandboxPolicy;
+use codex_app_server_transport::SITE_RELAY_ALLOWED_ROOTS_ENV_VAR;
+use codex_app_server_transport::decode_allowed_roots;
+
+#[derive(Debug, Clone)]
+pub(crate) struct RemoteRoots {
+    /// Canonical roots; `None` = unrestricted.
+    roots: Option<Vec<PathBuf>>,
+    /// Where relative paths and omitted cwds resolve (the server cwd).
+    base: PathBuf,
+    /// Saved threads live here; a remote resume may name a rollout file under it.
+    codex_home: PathBuf,
+}
+
+impl RemoteRoots {
+    /// Roots from the runtime option, else from [`SITE_RELAY_ALLOWED_ROOTS_ENV_VAR`].
+    pub(crate) fn resolve(
+        configured: Option<Vec<PathBuf>>,
+        base: PathBuf,
+        codex_home: PathBuf,
+    ) -> Self {
+        let configured = configured.or_else(|| {
+            std::env::var_os(SITE_RELAY_ALLOWED_ROOTS_ENV_VAR)
+                .map(|value| decode_allowed_roots(&value))
+        });
+        Self::new(configured, base, codex_home)
+    }
+
+    pub(crate) fn new(
+        configured: Option<Vec<PathBuf>>,
+        base: PathBuf,
+        codex_home: PathBuf,
+    ) -> Self {
+        let roots = configured.map(|roots| {
+            roots
+                .into_iter()
+                .filter_map(|root| {
+                    let absolute = if root.is_absolute() {
+                        root
+                    } else {
+                        base.join(root)
+                    };
+                    match std::fs::canonicalize(&absolute) {
+                        Ok(root) if root.is_dir() => Some(root),
+                        _ => {
+                            tracing::warn!(
+                                root = %absolute.display(),
+                                "remote-control allowed folder is not an existing directory; ignored"
+                            );
+                            None
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+        });
+        let codex_home = std::fs::canonicalize(&codex_home).unwrap_or(codex_home);
+        Self {
+            roots,
+            base,
+            codex_home,
+        }
+    }
+
+    pub(crate) fn unrestricted() -> Self {
+        Self {
+            roots: None,
+            base: PathBuf::new(),
+            codex_home: PathBuf::new(),
+        }
+    }
+
+    pub(crate) fn is_restricted(&self) -> bool {
+        self.roots.is_some()
+    }
+
+    /// `Ok` when `path` (absolute, or relative to the server cwd) is inside an allowed folder.
+    pub(crate) fn check(&self, path: &Path) -> Result<(), String> {
+        let Some(roots) = &self.roots else {
+            return Ok(());
+        };
+        let resolved = resolve(&self.base, path).ok_or_else(|| refusal(path))?;
+        if roots.iter().any(|root| resolved.starts_with(root)) {
+            Ok(())
+        } else {
+            Err(refusal(path))
+        }
+    }
+
+    /// [`Self::check`] when present; an omitted path means the server cwd.
+    pub(crate) fn check_or_base(&self, path: Option<&Path>) -> Result<(), String> {
+        self.check(path.unwrap_or(&self.base))
+    }
+
+    /// A saved-thread file named by resume/fork: allowed folders or the Codex home.
+    pub(crate) fn check_rollout(&self, path: &Path) -> Result<(), String> {
+        if self.roots.is_none() {
+            return Ok(());
+        }
+        match resolve(&self.base, path) {
+            Some(resolved) if resolved.starts_with(&self.codex_home) => Ok(()),
+            _ => self.check(path),
+        }
+    }
+}
+
+fn refusal(path: &Path) -> String {
+    format!(
+        "remote control may only use the folders allowed on this computer; `{}` is outside them \
+         (restart remote-control with --allow <DIR> to allow it)",
+        path.display()
+    )
+}
+
+/// Absolute, canonical form of `path`; `None` when it escapes through `..` below the deepest
+/// existing ancestor or cannot be resolved at all.
+fn resolve(base: &Path, path: &Path) -> Option<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base.join(path)
+    };
+    let mut existing = absolute.as_path();
+    let mut tail = Vec::new();
+    loop {
+        if let Ok(canonical) = std::fs::canonicalize(existing) {
+            if tail
+                .iter()
+                .any(|part: &Component<'_>| !matches!(part, Component::Normal(_)))
+            {
+                return None;
+            }
+            let mut resolved = canonical;
+            for part in tail.iter().rev() {
+                resolved.push(part.as_os_str());
+            }
+            return Some(resolved);
+        }
+        let name = existing.components().next_back()?;
+        tail.push(name);
+        existing = existing.parent()?;
+    }
+}
+
+/// What a request would touch on disk, as far as the allow-list is concerned.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct RequestScope {
+    /// Paths named by the request (absolute or relative to the server cwd).
+    pub(crate) paths: Vec<PathBuf>,
+    /// Saved-thread files named by resume/fork.
+    pub(crate) rollouts: Vec<PathBuf>,
+    /// The request runs in the server cwd because it named none.
+    pub(crate) server_cwd: bool,
+    /// The request runs in this thread's cwd because it named none; an unknown cwd is refused.
+    pub(crate) thread_cwd: Option<String>,
+}
+
+impl RequestScope {
+    fn cwd_or_server(cwd: Option<PathBuf>) -> Self {
+        match cwd {
+            Some(cwd) => Self {
+                paths: vec![cwd],
+                ..Self::default()
+            },
+            None => Self {
+                server_cwd: true,
+                ..Self::default()
+            },
+        }
+    }
+
+    fn cwd_or_thread(cwd: Option<PathBuf>, thread_id: &str) -> Self {
+        match cwd {
+            Some(cwd) => Self {
+                paths: vec![cwd],
+                ..Self::default()
+            },
+            None => Self::thread(thread_id),
+        }
+    }
+
+    fn thread(thread_id: &str) -> Self {
+        Self {
+            thread_cwd: Some(thread_id.to_string()),
+            ..Self::default()
+        }
+    }
+
+    fn paths(paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        Self {
+            paths: paths.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+
+    fn with_paths(mut self, paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        self.paths.extend(paths);
+        self
+    }
+}
+
+fn writable_roots(policy: Option<&SandboxPolicy>) -> Vec<PathBuf> {
+    match policy {
+        Some(SandboxPolicy::WorkspaceWrite { writable_roots, .. }) => writable_roots
+            .iter()
+            .map(|root| root.as_path().to_path_buf())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn absolute_paths<'a>(
+    paths: Option<&'a Vec<codex_utils_absolute_path::AbsolutePathBuf>>,
+) -> impl Iterator<Item = PathBuf> + 'a {
+    paths
+        .into_iter()
+        .flatten()
+        .map(|path| path.as_path().to_path_buf())
+}
+
+/// The cwd and paths of the requests that run commands, start agent work or touch files. Requests
+/// not listed here name no local folder.
+pub(crate) fn request_scope(request: &ClientRequest) -> RequestScope {
+    match request {
+        ClientRequest::ThreadStart { params, .. } => {
+            RequestScope::cwd_or_server(params.cwd.as_ref().map(PathBuf::from))
+                .with_paths(absolute_paths(params.runtime_workspace_roots.as_ref()))
+        }
+        ClientRequest::ThreadResume { params, .. } => {
+            let mut scope = RequestScope::cwd_or_thread(
+                params.cwd.as_ref().map(PathBuf::from),
+                &params.thread_id,
+            )
+            .with_paths(absolute_paths(params.runtime_workspace_roots.as_ref()));
+            scope.rollouts.extend(params.path.clone());
+            scope
+        }
+        ClientRequest::ThreadFork { params, .. } => {
+            let mut scope = RequestScope::cwd_or_thread(
+                params.cwd.as_ref().map(PathBuf::from),
+                &params.thread_id,
+            )
+            .with_paths(absolute_paths(params.runtime_workspace_roots.as_ref()));
+            scope.rollouts.extend(params.path.clone());
+            scope
+        }
+        ClientRequest::ThreadSettingsUpdate { params, .. } => {
+            RequestScope::paths(params.cwd.clone())
+                .with_paths(writable_roots(params.sandbox_policy.as_ref()))
+        }
+        ClientRequest::TurnStart { params, .. } => {
+            let environments = params
+                .environments
+                .iter()
+                .flatten()
+                .flat_map(|environment| {
+                    std::iter::once(PathBuf::from(environment.cwd.as_str())).chain(
+                        environment
+                            .runtime_workspace_roots
+                            .iter()
+                            .flatten()
+                            .map(|root| PathBuf::from(root.as_str())),
+                    )
+                });
+            RequestScope::cwd_or_thread(params.cwd.clone(), &params.thread_id)
+                .with_paths(environments)
+                .with_paths(absolute_paths(params.runtime_workspace_roots.as_ref()))
+                .with_paths(writable_roots(params.sandbox_policy.as_ref()))
+        }
+        ClientRequest::TurnSteer { params, .. } => RequestScope::thread(&params.thread_id),
+        ClientRequest::ReviewStart { params, .. } => RequestScope::thread(&params.thread_id),
+        ClientRequest::ThreadShellCommand { params, .. } => RequestScope::thread(&params.thread_id),
+        ClientRequest::ThreadCompactStart { params, .. } => RequestScope::thread(&params.thread_id),
+        ClientRequest::ThreadQueueStart { params, .. } => RequestScope::thread(&params.thread_id),
+        ClientRequest::ThreadRealtimeStart { params, .. } => {
+            RequestScope::thread(&params.thread_id)
+        }
+        ClientRequest::OneOffCommandExec { params, .. } => {
+            RequestScope::cwd_or_server(params.cwd.clone())
+        }
+        ClientRequest::ProcessSpawn { params, .. } => {
+            RequestScope::paths([params.cwd.as_path().to_path_buf()])
+        }
+        ClientRequest::SkillsExtraRootsSet { params, .. } => {
+            RequestScope::paths(absolute_paths(Some(&params.extra_roots)))
+        }
+        ClientRequest::FsReadFile { params, .. } => {
+            RequestScope::paths([params.path.to_path_buf()])
+        }
+        ClientRequest::FsWriteFile { params, .. } => {
+            RequestScope::paths([params.path.to_path_buf()])
+        }
+        ClientRequest::FsCreateDirectory { params, .. } => {
+            RequestScope::paths([params.path.to_path_buf()])
+        }
+        ClientRequest::FsGetMetadata { params, .. } => {
+            RequestScope::paths([params.path.to_path_buf()])
+        }
+        ClientRequest::FsReadDirectory { params, .. } => {
+            RequestScope::paths([params.path.to_path_buf()])
+        }
+        ClientRequest::FsRemove { params, .. } => RequestScope::paths([params.path.to_path_buf()]),
+        ClientRequest::FsCopy { params, .. } => RequestScope::paths([
+            params.source_path.to_path_buf(),
+            params.destination_path.to_path_buf(),
+        ]),
+        ClientRequest::FsWatch { params, .. } => RequestScope::paths([params.path.to_path_buf()]),
+        _ => RequestScope::default(),
+    }
+}
+
+#[cfg(test)]
+#[path = "remote_roots_tests.rs"]
+mod tests;

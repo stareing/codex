@@ -168,6 +168,7 @@ pub(crate) struct MessageProcessor {
     turn_processor: TurnRequestProcessor,
     windows_sandbox_processor: WindowsSandboxRequestProcessor,
     request_serialization_queues: RequestSerializationQueues,
+    remote_roots: crate::remote_roots::RemoteRoots,
 }
 
 #[derive(Debug)]
@@ -264,6 +265,8 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) remote_control_handle: Option<RemoteControlHandle>,
     /// `None` skips startup tasks; otherwise preserve the initial config-loading path.
     pub(crate) plugin_startup_tasks: Option<PluginStartupConfig>,
+    /// Folders remote-control requests may use (see `remote_roots`).
+    pub(crate) remote_roots: crate::remote_roots::RemoteRoots,
 }
 
 impl MessageProcessor {
@@ -289,6 +292,7 @@ impl MessageProcessor {
             rpc_transport,
             remote_control_handle,
             plugin_startup_tasks,
+            remote_roots,
         } = args;
         // Startup credential reads must not open a browser before initialize selects the policy.
         let gateway_login_control =
@@ -612,6 +616,7 @@ impl MessageProcessor {
             turn_processor,
             windows_sandbox_processor,
             request_serialization_queues,
+            remote_roots,
         }
     }
 
@@ -961,6 +966,33 @@ impl MessageProcessor {
         .await
     }
 
+    /// Refuses a remote-control request that would work outside the allowed folders.
+    async fn check_remote_roots(&self, request: &ClientRequest) -> Result<(), JSONRPCErrorError> {
+        let roots = &self.remote_roots;
+        if !roots.is_restricted() {
+            return Ok(());
+        }
+        let scope = crate::remote_roots::request_scope(request);
+        for path in &scope.paths {
+            roots.check(path).map_err(invalid_request)?;
+        }
+        for path in &scope.rollouts {
+            roots.check_rollout(path).map_err(invalid_request)?;
+        }
+        if scope.server_cwd {
+            roots.check_or_base(None).map_err(invalid_request)?;
+        }
+        if let Some(thread_id) = &scope.thread_cwd {
+            let Some(cwd) = Box::pin(self.thread_processor.thread_cwd(thread_id)).await else {
+                return Err(invalid_request(format!(
+                    "remote control may only use the folders allowed on this computer; the folder of thread {thread_id} is unknown, so pass `cwd` explicitly"
+                )));
+            };
+            roots.check(&cwd).map_err(invalid_request)?;
+        }
+        Ok(())
+    }
+
     async fn dispatch_initialized_client_request(
         self: &Arc<Self>,
         connection_request_id: ConnectionRequestId,
@@ -976,6 +1008,10 @@ impl MessageProcessor {
             && !session.experimental_api_enabled()
         {
             return Err(invalid_request(experimental_required_message(reason)));
+        }
+        if session.origin == crate::transport::ConnectionOrigin::RemoteControl {
+            // Boxed: the thread lookup would otherwise grow every request future.
+            Box::pin(self.check_remote_roots(&codex_request)).await?;
         }
         let connection_id = connection_request_id.connection_id;
         self.initialize_processor.track_initialized_request(

@@ -2810,6 +2810,15 @@ impl ThreadRequestProcessor {
         })
     }
 
+    /// The working directory of a loaded or saved thread (for the remote-control allow-list).
+    pub(crate) async fn thread_cwd(&self, thread_id: &str) -> Option<std::path::PathBuf> {
+        let thread_id = ThreadId::from_string(thread_id).ok()?;
+        self.read_thread_view(thread_id, /*include_turns*/ false)
+            .await
+            .ok()
+            .map(|thread| thread.cwd.to_path_buf())
+    }
+
     async fn thread_read_response_inner(
         &self,
         params: ThreadReadParams,

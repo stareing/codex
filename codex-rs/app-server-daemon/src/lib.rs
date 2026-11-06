@@ -243,6 +243,33 @@ pub async fn ensure_remote_control_ready() -> Result<RemoteControlReadyOutput> {
     Box::pin(Daemon::from_environment()?.ensure_remote_control_ready()).await
 }
 
+/// [`ensure_remote_control_ready`] limited to `allowed_roots` (absolute folders). The roots are
+/// saved in the daemon state directory and applied on every daemon launch; a running daemon is
+/// restarted when they change so it never keeps serving the old folders.
+pub async fn ensure_remote_control_ready_with_allowed_roots(
+    allowed_roots: &[PathBuf],
+) -> Result<RemoteControlReadyOutput> {
+    ensure_supported_platform()?;
+    #[cfg(windows)]
+    backend::windows::ensure_not_elevated()?;
+    let daemon = Daemon::from_environment()?;
+    let changed = {
+        let _operation_lock = daemon.acquire_operation_lock().await?;
+        let state_dir = daemon
+            .settings_file
+            .parent()
+            .context("daemon settings path has no parent")?;
+        codex_app_server_transport::write_allowed_roots_file(state_dir, allowed_roots)
+            .context("failed to save the remote-control allowed folders")?
+    };
+    if changed && client::probe(&daemon.socket_path).await.is_ok() {
+        Box::pin(daemon.run(LifecycleCommand::Restart))
+            .await
+            .context("restart the app-server daemon to apply the new allowed folders")?;
+    }
+    Box::pin(daemon.ensure_remote_control_ready()).await
+}
+
 pub async fn enable_remote_control_on_socket(
     socket_path: &Path,
     connect_timeout: Duration,
