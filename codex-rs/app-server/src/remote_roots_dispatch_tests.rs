@@ -107,6 +107,36 @@ async fn remote_requests_outside_the_allowed_folders_are_refused_body() -> Resul
         serde_json::to_value(response.result)?["dataBase64"],
         json!("aW4=")
     );
+
+    // File-name search may not list another folder's names.
+    h.send(
+        5,
+        "fuzzyFileSearch",
+        json!({"query": "out", "roots": [folders.outside]}),
+    )
+    .await;
+    assert_eq!(refusal(h.response().await, 5).code, -32600);
+    h.send(
+        6,
+        "fuzzyFileSearch",
+        json!({"query": "in", "roots": [folders.allowed]}),
+    )
+    .await;
+    let OutgoingMessage::Response(response) = h.response().await else {
+        panic!("searching inside the allowed folder should succeed")
+    };
+    let files = serde_json::to_value(response.result)?["files"].clone();
+    assert_eq!(files[0]["path"], json!("in.txt"), "{files}");
+
+    // Requests the allow-list cannot judge are refused outright.
+    h.send(
+        7,
+        "externalAgentConfig/import",
+        json!({"migrationItems": []}),
+    )
+    .await;
+    let error = refusal(h.response().await, 7);
+    assert!(error.message.contains("cannot import"), "{}", error.message);
     h.shutdown().await;
     Ok(())
 }

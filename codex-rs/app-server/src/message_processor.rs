@@ -973,6 +973,9 @@ impl MessageProcessor {
             return Ok(());
         }
         let scope = crate::remote_roots::request_scope(request);
+        if let Some(reason) = scope.refused {
+            return Err(invalid_request(reason.to_string()));
+        }
         for path in &scope.paths {
             roots.check(path).map_err(invalid_request)?;
         }

@@ -69,11 +69,7 @@ fn relative_paths_and_omitted_cwd_resolve_against_the_server_cwd() {
     assert!(roots.check(Path::new("../other")).is_err());
 
     // Server started outside the allowed folders: an omitted cwd is refused.
-    let elsewhere = RemoteRoots::new(
-        Some(vec![fx.root.clone()]),
-        fx.outside.clone(),
-        fx.home,
-    );
+    let elsewhere = RemoteRoots::new(Some(vec![fx.root.clone()]), fx.outside.clone(), fx.home);
     assert!(elsewhere.check_or_base(None).is_err());
     assert!(elsewhere.check(Path::new("x")).is_err());
 }
@@ -231,6 +227,142 @@ fn request_scopes_name_every_folder_the_request_uses() {
     assert_eq!(
         scope_of("fs/readFile", serde_json::json!({"path": "/a"})).paths,
         vec![PathBuf::from("/a")]
+    );
+    // Searches, listings and plugin files name folders too; none listed means the server cwd.
+    assert_eq!(
+        scope_of(
+            "fuzzyFileSearch",
+            serde_json::json!({"query": "a", "roots": ["/w", "/x"]})
+        )
+        .paths,
+        vec![PathBuf::from("/w"), PathBuf::from("/x")]
+    );
+    assert!(
+        scope_of(
+            "fuzzyFileSearch",
+            serde_json::json!({"query": "a", "roots": []})
+        )
+        .server_cwd
+    );
+    assert_eq!(
+        scope_of(
+            "fuzzyFileSearch/sessionStart",
+            serde_json::json!({"sessionId": "s", "roots": ["/w"]})
+        )
+        .paths,
+        vec![PathBuf::from("/w")]
+    );
+    assert!(scope_of("skills/list", serde_json::json!({})).server_cwd);
+    assert_eq!(
+        scope_of("hooks/list", serde_json::json!({"cwds": ["/h"]})).paths,
+        vec![PathBuf::from("/h")]
+    );
+    assert_eq!(
+        scope_of("plugin/list", serde_json::json!({"cwds": ["/p"]})).paths,
+        vec![PathBuf::from("/p")]
+    );
+    assert_eq!(
+        scope_of(
+            "plugin/read",
+            serde_json::json!({"marketplacePath": "/m/marketplace.json", "pluginName": "x"})
+        )
+        .paths,
+        vec![PathBuf::from("/m/marketplace.json")]
+    );
+    assert_eq!(
+        scope_of(
+            "plugin/share/save",
+            serde_json::json!({"pluginPath": "/pp"})
+        )
+        .paths,
+        vec![PathBuf::from("/pp")]
+    );
+    assert_eq!(
+        scope_of("config/read", serde_json::json!({"cwd": "/cfg"})).paths,
+        vec![PathBuf::from("/cfg")]
+    );
+    assert_eq!(
+        scope_of(
+            "feedback/upload",
+            serde_json::json!({"classification": "bug", "includeLogs": true, "extraLogFiles": ["/etc/shadow"]})
+        )
+        .paths,
+        vec![PathBuf::from("/etc/shadow")]
+    );
+    assert_eq!(
+        scope_of("gitDiffToRemote", serde_json::json!({"cwd": "/g"})).paths,
+        vec![PathBuf::from("/g")]
+    );
+    assert_eq!(
+        scope_of(
+            "getConversationSummary",
+            serde_json::json!({"rolloutPath": "/r.jsonl"})
+        )
+        .rollouts,
+        vec![PathBuf::from("/r.jsonl")]
+    );
+    // A command's extra writable folders, and the files a turn's input reads.
+    assert_eq!(
+        scope_of(
+            "command/exec",
+            serde_json::json!({"command": ["ls"], "cwd": "/c",
+                "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": ["/wr"]}})
+        )
+        .paths,
+        vec![PathBuf::from("/c"), PathBuf::from("/wr")]
+    );
+    let steer = scope_of(
+        "turn/steer",
+        serde_json::json!({"threadId": thread_id, "expectedTurnId": "t", "input": [
+            {"type": "localImage", "path": "/i.png"},
+            {"type": "localAudio", "path": "/a.wav"},
+            {"type": "skill", "name": "s", "path": "/s/SKILL.md"},
+            {"type": "mention", "name": "m", "path": "app://m"},
+            {"type": "text", "text": "hi"},
+        ]}),
+    );
+    assert_eq!(steer.thread_cwd.as_deref(), Some(thread_id));
+    assert_eq!(
+        steer.paths,
+        ["/i.png", "/a.wav"].map(PathBuf::from).to_vec()
+    );
+    assert_eq!(steer.rollouts, vec![PathBuf::from("/s/SKILL.md")]);
+    assert_eq!(
+        scope_of(
+            "thread/start",
+            serde_json::json!({"environments": [{"environmentId": "local", "cwd": "/e"}]})
+        )
+        .paths,
+        vec![PathBuf::from("/e")]
+    );
+    // What the allow-list cannot judge is refused.
+    for (method, params) in [
+        ("marketplace/add", serde_json::json!({"source": "~/market"})),
+        (
+            "marketplace/add",
+            serde_json::json!({"source": "../market"}),
+        ),
+        ("marketplace/add", serde_json::json!({"source": "/market"})),
+        (
+            "externalAgentConfig/detect",
+            serde_json::json!({"includeHome": true}),
+        ),
+        (
+            "externalAgentConfig/import",
+            serde_json::json!({"migrationItems": []}),
+        ),
+    ] {
+        assert!(
+            scope_of(method, params.clone()).refused.is_some(),
+            "{method} {params}"
+        );
+    }
+    assert_eq!(
+        scope_of(
+            "marketplace/add",
+            serde_json::json!({"source": "owner/repo"})
+        ),
+        RequestScope::default()
     );
     // Requests that name no folder are not checked.
     assert_eq!(

@@ -138,7 +138,9 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    # A cold cache (the cache is saved only when the job succeeds) took more than 150 min in run
+    # 42289835783, so a timed-out run never warmed it for the next one.
+    timeout-minutes: 300
     steps:
       - name: Free disk space
         run: |
