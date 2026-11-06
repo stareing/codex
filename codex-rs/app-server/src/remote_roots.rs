@@ -21,7 +21,11 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::GetConversationSummaryParams;
+use codex_app_server_protocol::ProjectRoot;
 use codex_app_server_protocol::SandboxPolicy;
+use codex_app_server_protocol::TurnEnvironmentParams;
+use codex_app_server_protocol::UserInput;
 use codex_app_server_transport::SITE_RELAY_ALLOWED_ROOTS_ENV_VAR;
 use codex_app_server_transport::decode_allowed_roots;
 
@@ -169,12 +173,15 @@ fn resolve(base: &Path, path: &Path) -> Option<PathBuf> {
 pub(crate) struct RequestScope {
     /// Paths named by the request (absolute or relative to the server cwd).
     pub(crate) paths: Vec<PathBuf>,
-    /// Saved-thread files named by resume/fork.
+    /// Saved-thread files named by resume/fork, and skill files named in input: allowed folders
+    /// or the Codex home.
     pub(crate) rollouts: Vec<PathBuf>,
     /// The request runs in the server cwd because it named none.
     pub(crate) server_cwd: bool,
     /// The request runs in this thread's cwd because it named none; an unknown cwd is refused.
     pub(crate) thread_cwd: Option<String>,
+    /// Refused outright: the request reaches local files the allow-list cannot judge.
+    pub(crate) refused: Option<&'static str>,
 }
 
 impl RequestScope {
@@ -219,6 +226,75 @@ impl RequestScope {
         self.paths.extend(paths);
         self
     }
+
+    /// Folders listed by the request; none listed means the server cwd.
+    fn folders_or_server(folders: impl IntoIterator<Item = PathBuf>) -> Self {
+        let paths: Vec<PathBuf> = folders.into_iter().collect();
+        if paths.is_empty() {
+            Self::cwd_or_server(None)
+        } else {
+            Self::paths(paths)
+        }
+    }
+
+    /// The local files a turn's input reads (images, audio, skills); mentions name tools, not files.
+    fn with_input(mut self, input: &[UserInput]) -> Self {
+        for item in input {
+            match item {
+                UserInput::LocalImage { path, .. } | UserInput::LocalAudio { path } => {
+                    self.paths.push(path.clone())
+                }
+                UserInput::Skill { path, .. } => self.rollouts.push(path.clone()),
+                UserInput::Text { .. }
+                | UserInput::Image { .. }
+                | UserInput::Audio { .. }
+                | UserInput::Mention { .. } => {}
+            }
+        }
+        self
+    }
+
+    fn refuse(reason: &'static str) -> Self {
+        Self {
+            refused: Some(reason),
+            ..Self::default()
+        }
+    }
+}
+
+fn environment_paths(environments: Option<&Vec<TurnEnvironmentParams>>) -> Vec<PathBuf> {
+    environments
+        .into_iter()
+        .flatten()
+        .flat_map(|environment| {
+            std::iter::once(PathBuf::from(environment.cwd.as_str())).chain(
+                environment
+                    .runtime_workspace_roots
+                    .iter()
+                    .flatten()
+                    .map(|root| PathBuf::from(root.as_str())),
+            )
+        })
+        .collect()
+}
+
+fn project_roots(roots: Option<&Vec<ProjectRoot>>) -> impl Iterator<Item = PathBuf> + '_ {
+    roots
+        .into_iter()
+        .flatten()
+        .map(|root| root.path.as_path().to_path_buf())
+}
+
+/// The forms `marketplace/add` reads as a local folder (core-plugins `looks_like_local_path`).
+fn looks_like_local_source(source: &str) -> bool {
+    let source = source.trim();
+    let bytes = source.as_bytes();
+    Path::new(source).is_absolute()
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        || source.starts_with('.')
+        || source.starts_with('~')
+        || source.starts_with('/')
+        || source.starts_with('\\')
 }
 
 fn writable_roots(policy: Option<&SandboxPolicy>) -> Vec<PathBuf> {
@@ -245,7 +321,17 @@ fn absolute_paths<'a>(
 pub(crate) fn request_scope(request: &ClientRequest) -> RequestScope {
     match request {
         ClientRequest::ThreadStart { params, .. } => {
+            if params
+                .selected_capability_roots
+                .as_ref()
+                .is_some_and(|roots| !roots.is_empty())
+            {
+                return RequestScope::refuse(
+                    "remote control cannot select capability roots on this computer",
+                );
+            }
             RequestScope::cwd_or_server(params.cwd.as_ref().map(PathBuf::from))
+                .with_paths(environment_paths(params.environments.as_ref()))
                 .with_paths(absolute_paths(params.runtime_workspace_roots.as_ref()))
         }
         ClientRequest::ThreadResume { params, .. } => {
@@ -271,25 +357,21 @@ pub(crate) fn request_scope(request: &ClientRequest) -> RequestScope {
                 .with_paths(writable_roots(params.sandbox_policy.as_ref()))
         }
         ClientRequest::TurnStart { params, .. } => {
-            let environments = params
-                .environments
-                .iter()
-                .flatten()
-                .flat_map(|environment| {
-                    std::iter::once(PathBuf::from(environment.cwd.as_str())).chain(
-                        environment
-                            .runtime_workspace_roots
-                            .iter()
-                            .flatten()
-                            .map(|root| PathBuf::from(root.as_str())),
-                    )
-                });
             RequestScope::cwd_or_thread(params.cwd.clone(), &params.thread_id)
-                .with_paths(environments)
+                .with_paths(environment_paths(params.environments.as_ref()))
                 .with_paths(absolute_paths(params.runtime_workspace_roots.as_ref()))
                 .with_paths(writable_roots(params.sandbox_policy.as_ref()))
+                .with_input(&params.input)
         }
-        ClientRequest::TurnSteer { params, .. } => RequestScope::thread(&params.thread_id),
+        ClientRequest::TurnSteer { params, .. } => {
+            RequestScope::thread(&params.thread_id).with_input(&params.input)
+        }
+        ClientRequest::ThreadQueueAdd { params, .. } => {
+            RequestScope::thread(&params.thread_id).with_input(&params.input)
+        }
+        ClientRequest::ThreadQueueUpdate { params, .. } => {
+            RequestScope::thread(&params.thread_id).with_input(&params.input)
+        }
         ClientRequest::ReviewStart { params, .. } => RequestScope::thread(&params.thread_id),
         ClientRequest::ThreadShellCommand { params, .. } => RequestScope::thread(&params.thread_id),
         ClientRequest::ThreadCompactStart { params, .. } => RequestScope::thread(&params.thread_id),
@@ -299,6 +381,7 @@ pub(crate) fn request_scope(request: &ClientRequest) -> RequestScope {
         }
         ClientRequest::OneOffCommandExec { params, .. } => {
             RequestScope::cwd_or_server(params.cwd.clone())
+                .with_paths(writable_roots(params.sandbox_policy.as_ref()))
         }
         ClientRequest::ProcessSpawn { params, .. } => {
             RequestScope::paths([params.cwd.as_path().to_path_buf()])
@@ -327,6 +410,100 @@ pub(crate) fn request_scope(request: &ClientRequest) -> RequestScope {
             params.destination_path.to_path_buf(),
         ]),
         ClientRequest::FsWatch { params, .. } => RequestScope::paths([params.path.to_path_buf()]),
+        ClientRequest::FuzzyFileSearch { params, .. } => {
+            RequestScope::folders_or_server(params.roots.iter().map(PathBuf::from))
+        }
+        ClientRequest::FuzzyFileSearchSessionStart { params, .. } => {
+            RequestScope::folders_or_server(params.roots.iter().map(PathBuf::from))
+        }
+        ClientRequest::SkillsList { params, .. } => {
+            RequestScope::folders_or_server(params.cwds.iter().cloned())
+        }
+        ClientRequest::HooksList { params, .. } => {
+            RequestScope::folders_or_server(params.cwds.iter().cloned())
+        }
+        ClientRequest::PluginList { params, .. } => {
+            RequestScope::paths(absolute_paths(params.cwds.as_ref()))
+        }
+        ClientRequest::PluginInstalled { params, .. } => {
+            RequestScope::paths(absolute_paths(params.cwds.as_ref()))
+        }
+        ClientRequest::PluginSearch { params, .. } => {
+            RequestScope::paths(absolute_paths(params.cwds.as_ref()))
+        }
+        ClientRequest::PluginRead { params, .. } => RequestScope::paths(
+            params
+                .marketplace_path
+                .iter()
+                .map(|path| path.as_path().to_path_buf()),
+        ),
+        ClientRequest::PluginInstall { params, .. } => RequestScope::paths(
+            params
+                .marketplace_path
+                .iter()
+                .map(|path| path.as_path().to_path_buf()),
+        ),
+        ClientRequest::PluginShareSave { params, .. } => {
+            RequestScope::paths([params.plugin_path.as_path().to_path_buf()])
+        }
+        ClientRequest::SkillsConfigWrite { params, .. } => RequestScope {
+            rollouts: params
+                .path
+                .iter()
+                .map(|path| path.as_path().to_path_buf())
+                .collect(),
+            ..RequestScope::default()
+        },
+        ClientRequest::MarketplaceAdd { params, .. } => {
+            if looks_like_local_source(&params.source) {
+                RequestScope::refuse(
+                    "remote control cannot add a marketplace from a folder on this computer",
+                )
+            } else {
+                RequestScope::default()
+            }
+        }
+        ClientRequest::ConfigRead { params, .. } => {
+            RequestScope::paths(params.cwd.iter().map(PathBuf::from))
+        }
+        ClientRequest::PermissionProfileList { params, .. } => {
+            RequestScope::paths(params.cwd.iter().map(PathBuf::from))
+        }
+        ClientRequest::ExternalAgentConfigDetect { params, .. } => {
+            if params.include_home {
+                RequestScope::refuse(
+                    "remote control cannot scan the home folder for other agents' settings",
+                )
+            } else {
+                RequestScope::paths(params.cwds.iter().flatten().cloned())
+            }
+        }
+        ClientRequest::ExternalAgentConfigImport { .. } => RequestScope::refuse(
+            "remote control cannot import other agents' settings on this computer",
+        ),
+        ClientRequest::FeedbackUpload { params, .. } => {
+            RequestScope::paths(params.extra_log_files.iter().flatten().cloned())
+        }
+        ClientRequest::WindowsSandboxSetupStart { params, .. } => {
+            RequestScope::cwd_or_server(params.cwd.as_ref().map(|cwd| cwd.as_path().to_path_buf()))
+        }
+        ClientRequest::ProjectCreate { params, .. } => {
+            RequestScope::paths(project_roots(Some(&params.roots)))
+        }
+        ClientRequest::ProjectImport { params, .. } => {
+            RequestScope::paths(project_roots(Some(&params.roots)))
+        }
+        ClientRequest::ProjectUpdate { params, .. } => {
+            RequestScope::paths(project_roots(params.roots.as_ref()))
+        }
+        ClientRequest::GitDiffToRemote { params, .. } => RequestScope::paths([params.cwd.clone()]),
+        ClientRequest::GetConversationSummary { params, .. } => match params {
+            GetConversationSummaryParams::RolloutPath { rollout_path } => RequestScope {
+                rollouts: vec![rollout_path.clone()],
+                ..RequestScope::default()
+            },
+            GetConversationSummaryParams::ThreadId { .. } => RequestScope::default(),
+        },
         _ => RequestScope::default(),
     }
 }
