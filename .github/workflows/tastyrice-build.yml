@@ -59,7 +59,9 @@ jobs:
           sha256sum codex-x86_64-unknown-linux-gnu.tar.gz > codex-x86_64-unknown-linux-gnu.tar.gz.sha256
           mkdir branded
           cp dist/codex branded/onigio-agent
-          ./branded/onigio-agent --help | head -3 | grep -q 'onigio-agent \[OPTIONS\]'
+          ./branded/onigio-agent --help > branded-help.txt
+          head -1 branded-help.txt | grep -q '^Onigio agent'
+          grep -q '^Usage: onigio-agent \[OPTIONS\]' branded-help.txt
           tar -C branded -czf onigio-agent-x86_64-unknown-linux-gnu.tar.gz onigio-agent
           sha256sum onigio-agent-x86_64-unknown-linux-gnu.tar.gz > onigio-agent-x86_64-unknown-linux-gnu.tar.gz.sha256
           df -h /

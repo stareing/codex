@@ -22,15 +22,49 @@ pub fn branded_name(argv0: Option<&std::ffi::OsStr>) -> Option<&'static str> {
         .then_some(BRANDED_BIN_NAME)
 }
 
+const ABOUT: &str = "Onigio agent: a coding agent for your computer, reachable from the site.";
+
 /// Renames the top-level command for help and usage output.
 pub fn rename_command(command: Command, name: &'static str) -> Command {
-    command
+    rebrand_texts(command)
         .name(name)
         .bin_name(name)
-        .about("Onigio agent: a coding agent for your computer, reachable from the site.")
+        .about(ABOUT)
+        // The derive's doc comment is the long help (`--help`); replace it too.
+        .long_about(ABOUT)
         .override_usage(format!(
             "{name} [OPTIONS] [PROMPT]\n       {name} [OPTIONS] <COMMAND> [ARGS]"
         ))
+}
+
+/// The upstream product name in help text, replaced recursively (subcommands and arguments).
+/// Paths such as `~/.codex` and `$CODEX_HOME` stay as they are: they are real locations.
+fn rebrand(text: &clap::builder::StyledStr) -> String {
+    text.to_string().replace("Codex", "Onigio agent")
+}
+
+fn rebrand_texts(command: Command) -> Command {
+    let about = command.get_about().map(rebrand);
+    let long_about = command.get_long_about().map(rebrand);
+    let mut command = command.mut_args(|arg| {
+        let help = arg.get_help().map(rebrand);
+        let long_help = arg.get_long_help().map(rebrand);
+        let arg = match help {
+            Some(help) => arg.help(help),
+            None => arg,
+        };
+        match long_help {
+            Some(long_help) => arg.long_help(long_help),
+            None => arg,
+        }
+    });
+    if let Some(about) = about {
+        command = command.about(about);
+    }
+    if let Some(long_about) = long_about {
+        command = command.long_about(long_about);
+    }
+    command.mut_subcommands(rebrand_texts)
 }
 
 /// Whether this process was started as the branded executable (`onigio-agent`).
@@ -82,13 +116,30 @@ mod tests {
         let mut command = rename_command(
             Command::new("codex")
                 .about("Codex CLI")
+                // The real command's doc comment sets a long help, which `--help` prints.
+                .long_about("Codex CLI\n\nIf no subcommand is specified, ...")
                 .bin_name("codex")
-                .subcommand(Command::new("login")),
+                .arg(
+                    clap::Arg::new("strict")
+                        .long("strict")
+                        .help("Unknown to this version of Codex"),
+                )
+                .subcommand(Command::new("exec").about("Run Codex non-interactively")),
             BRANDED_BIN_NAME,
         );
-        let help = command.render_help().to_string();
-        assert!(help.contains("onigio-agent [OPTIONS] [PROMPT]"), "{help}");
-        assert!(!help.contains("codex [OPTIONS]"), "{help}");
-        assert!(help.starts_with("Onigio agent"), "{help}");
+        for help in [
+            command.render_help().to_string(),
+            command.render_long_help().to_string(),
+        ] {
+            assert!(help.contains("onigio-agent [OPTIONS] [PROMPT]"), "{help}");
+            assert!(!help.contains("codex [OPTIONS]"), "{help}");
+            assert!(!help.contains("Codex"), "{help}");
+            assert!(help.starts_with("Onigio agent"), "{help}");
+        }
+        let exec = command.find_subcommand_mut("exec").expect("exec");
+        assert_eq!(
+            exec.render_help().to_string().lines().next(),
+            Some("Run Onigio agent non-interactively")
+        );
     }
 }
