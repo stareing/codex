@@ -131,6 +131,7 @@ mod notification_media;
 mod otel_reloader;
 mod outgoing_message;
 mod plugin_config_reload;
+mod remote_roots;
 mod request_processors;
 mod request_serialization;
 mod server_request_error;
@@ -472,6 +473,9 @@ pub struct AppServerRuntimeOptions {
     pub remote_control_startup_mode: RemoteControlStartupMode,
     pub install_shutdown_signal_handler: bool,
     pub managed_daemon: bool,
+    /// Folders remote-control requests may use; `None` reads `SITE_RELAY_ALLOWED_ROOTS`, and when
+    /// that is unset too, remote control is unrestricted (see `remote_roots`).
+    pub remote_control_allowed_roots: Option<Vec<std::path::PathBuf>>,
 }
 
 impl Default for AppServerRuntimeOptions {
@@ -482,6 +486,7 @@ impl Default for AppServerRuntimeOptions {
             remote_control_startup_mode: RemoteControlStartupMode::ResolvePersisted,
             install_shutdown_signal_handler: true,
             managed_daemon: false,
+            remote_control_allowed_roots: None,
         }
     }
 }
@@ -968,6 +973,11 @@ pub async fn run_main_with_transport_options(
         let auth_manager = Arc::clone(&auth_manager);
         let initialize_notification_sender = outgoing_message_sender.clone();
         let outbound_control_tx = outbound_control_tx;
+        let remote_roots = crate::remote_roots::RemoteRoots::resolve(
+            runtime_options.remote_control_allowed_roots.clone(),
+            config.cwd.to_path_buf(),
+            config.codex_home.to_path_buf(),
+        );
         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
             outgoing: outgoing_message_sender,
             analytics_events_client,
@@ -993,6 +1003,7 @@ pub async fn run_main_with_transport_options(
                 PluginStartupTasks::Start
             )
             .then_some(plugin_startup_config),
+            remote_roots,
         }));
         let mut thread_created_rx = processor.thread_created_receiver();
         let mut running_turn_count_rx = processor.subscribe_running_assistant_turn_count();

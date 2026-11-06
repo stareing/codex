@@ -923,3 +923,41 @@ fn inaccessible_pid_preserves_identity_check_error() {
     .join()
     .expect("anonymous identity check");
 }
+
+#[test]
+fn app_server_launch_carries_the_saved_remote_control_folders() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let backend = PidBackend::new(
+        temp_dir.path().join("codex"),
+        temp_dir.path().join("app-server.pid"),
+        /*remote_control_enabled*/ true,
+    );
+    assert_eq!(backend.remote_allowed_roots_env().expect("no file"), None);
+
+    let roots = vec![
+        temp_dir.path().join("project"),
+        temp_dir.path().join("docs"),
+    ];
+    codex_app_server_transport::write_allowed_roots_file(temp_dir.path(), &roots)
+        .expect("save roots");
+    let env = backend
+        .remote_allowed_roots_env()
+        .expect("read roots")
+        .expect("roots saved");
+    assert_eq!(
+        codex_app_server_transport::decode_allowed_roots(&env),
+        roots
+    );
+
+    std::fs::write(
+        temp_dir
+            .path()
+            .join(codex_app_server_transport::REMOTE_ALLOWED_ROOTS_FILE),
+        "not json",
+    )
+    .expect("corrupt roots");
+    assert!(
+        backend.remote_allowed_roots_env().is_err(),
+        "a corrupt allow-list must stop the launch, not drop the restriction"
+    );
+}

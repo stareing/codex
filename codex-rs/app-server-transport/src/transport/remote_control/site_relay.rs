@@ -234,6 +234,10 @@ pub struct SiteAccount {
     pub account_id: String,
     pub device_id: u64,
     pub name: String,
+    /// The model the site suggests for this account's plan; absent in files written before it
+    /// existed. Used only when the user's config does not choose a model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 impl SiteAccount {

@@ -51,6 +51,7 @@ static ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod app_cmd;
+mod brand;
 mod cloud_config;
 mod daemon_install;
 mod daemon_telemetry;
@@ -63,6 +64,7 @@ mod exec_server_args_tests;
 mod exec_server_auth;
 mod exec_server_command;
 mod exec_server_telemetry;
+mod host_info;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod mcp_login;
@@ -73,6 +75,7 @@ mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
 mod site_login;
+mod site_password;
 mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;
@@ -529,6 +532,31 @@ struct LoginCommand {
     /// Site to sign in to (default: this build's site, or $AGENT_SITE_URL).
     #[arg(long = "site", value_name = "URL")]
     site: Option<String>,
+
+    /// Sign in with the site account's username (or email) and password instead of the browser;
+    /// prompts on the terminal.
+    #[arg(long = "password", conflicts_with_all = ["with_api_key", "with_access_token", "use_device_code"])]
+    password: bool,
+
+    /// Username or email for the password sign-in (implies --password).
+    #[arg(long = "username", value_name = "USERNAME", conflicts_with_all = ["with_api_key", "with_access_token", "use_device_code"])]
+    username: Option<String>,
+
+    /// Read the password from the first line of stdin (implies --password; needs --username).
+    #[arg(long = "password-stdin", conflicts_with_all = ["with_api_key", "with_access_token", "use_device_code"])]
+    password_stdin: bool,
+
+    /// Two-factor code for the password sign-in.
+    #[arg(long = "otp", value_name = "CODE", conflicts_with_all = ["with_api_key", "with_access_token", "use_device_code"])]
+    otp: Option<String>,
+
+    /// Print one machine-readable JSON result line (also for `login status`).
+    #[arg(long = "json", global = true)]
+    json: bool,
+
+    /// Do not report the host configuration summary to the site after signing in.
+    #[arg(long = "no-host-info")]
+    no_host_info: bool,
 
     /// EXPERIMENTAL: Use custom OAuth issuer base URL (advanced)
     /// Override the OAuth issuer base URL (advanced)
@@ -1036,7 +1064,17 @@ async fn cli_main(
         remote,
         mut interactive,
         subcommand,
-    } = MultitoolCli::parse();
+    } = {
+        // The shipped binary never falls back to the upstream default provider: a session needs a
+        // site sign-in or an explicitly configured provider. The cargo `codex` binary keeps
+        // upstream behaviour for upstream's integration tests.
+        if brand::invoked_as_branded() {
+            codex_core::config::site_account_provider::require_chosen_model_provider();
+        }
+        let matches = brand::get_matches(<MultitoolCli as clap::CommandFactory>::command());
+        <MultitoolCli as clap::FromArgMatches>::from_arg_matches(&matches)
+            .unwrap_or_else(|err| err.exit())
+    };
     // Retain the launch target through TUI exit, even if a launcher changes selection.
     let daemon_cli_executable = arg0_paths
         .codex_self_exe
@@ -1568,6 +1606,9 @@ async fn cli_main(
             );
             match login_cli.action {
                 Some(LoginSubcommand::Status) => {
+                    if login_cli.json {
+                        site_login::run_site_status_json();
+                    }
                     if let Some(status) = site_login::site_status() {
                         eprintln!("{status}");
                         std::process::exit(0);
@@ -1600,7 +1641,23 @@ async fn cli_main(
                         run_login_with_access_token(login_cli.config_overrides, access_token).await;
                     } else {
                         // Site accounts are the default sign-in (REMOTE_CONTROL.md R7).
-                        site_login::run_login(login_cli.site).await;
+                        let password = (login_cli.password
+                            || login_cli.password_stdin
+                            || login_cli.username.is_some()
+                            || login_cli.otp.is_some())
+                        .then_some(site_password::PasswordArgs {
+                            username: login_cli.username,
+                            password_stdin: login_cli.password_stdin,
+                            otp: login_cli.otp,
+                        });
+                        site_login::run_login(site_login::LoginRequest {
+                            site: login_cli.site,
+                            json: login_cli.json,
+                            no_host_info: login_cli.no_host_info,
+                            password,
+                            config_overrides: login_cli.config_overrides,
+                        })
+                        .await;
                     }
                 }
             }

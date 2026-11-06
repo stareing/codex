@@ -175,6 +175,7 @@ mod permission_profile_selection;
 mod permissions;
 mod requirements;
 mod resolved_permission_profile;
+pub mod site_account_provider;
 #[cfg(test)]
 mod schema;
 mod token_budget_startup;
@@ -646,6 +647,9 @@ pub struct Config {
 
     /// Info needed to make an API request to the model.
     pub model_provider: ModelProviderInfo,
+
+    /// What chose `model_provider` (site_account_provider.rs).
+    pub model_provider_source: site_account_provider::ProviderSource,
 
     /// Deprecated: `friendly` and `pragmatic` no longer select a style.
     pub personality: Option<Personality>,
@@ -3340,6 +3344,14 @@ impl Config {
             additional_writable_roots,
             workspace_roots: workspace_roots_override,
         } = overrides;
+        // A site sign-in routes model requests through the site's relay unless something else
+        // chose a provider (site_account_provider.rs).
+        let model_provider_source = site_account_provider::resolve_provider(
+            &mut cfg,
+            site_account_provider::SiteModelAccess::load(codex_home.as_path()).as_ref(),
+            config_layer_stack.required_model_provider(),
+            model_provider.as_deref(),
+        );
         let bypass_hook_trust = bypass_hook_trust.unwrap_or_default();
 
         if bypass_hook_trust {
@@ -4269,6 +4281,7 @@ impl Config {
                 .unwrap_or_default(),
             model_provider_id,
             model_provider,
+            model_provider_source,
             cwd: resolved_cwd,
             workspace_roots: workspace_roots.clone(),
             workspace_roots_explicit,

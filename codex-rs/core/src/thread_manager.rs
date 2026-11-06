@@ -434,10 +434,21 @@ pub fn build_models_manager(
     auth_manager: Arc<AuthManager>,
 ) -> SharedModelsManager {
     let provider = create_model_provider(config.model_provider.clone(), Some(auth_manager));
-    let manager = provider.models_manager(
-        config.codex_home.to_path_buf(),
-        config.model_catalog.clone(),
+    let own_catalog = crate::config::site_account_provider::own_catalog_fallback(
+        &config.model_provider_id,
+        &config.model_provider,
+        config.model.as_deref(),
+        config.model_catalog.as_ref(),
     );
+    let manager = match own_catalog {
+        Some(fallback) => {
+            provider.models_manager_with_own_catalog(config.codex_home.to_path_buf(), fallback)
+        }
+        None => provider.models_manager(
+            config.codex_home.to_path_buf(),
+            config.model_catalog.clone(),
+        ),
+    };
     manager.set_api_key_model_discovery_enabled(
         config.features.enabled(Feature::ApiKeyModelDiscovery),
     );
@@ -2077,6 +2088,10 @@ impl ThreadManagerState {
             mut reserved_thread_id,
             disabled_plugin_ids,
         } = options;
+        crate::config::site_account_provider::ensure_model_configured(
+            config.model_provider_source,
+        )
+        .map_err(CodexErr::InvalidRequest)?;
         let inherited_environments = captured_environments.or(inherited_environments);
         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
         // Older callers and saved reviewers identify isolation through their source.

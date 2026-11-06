@@ -2,7 +2,10 @@
 # Every push to `tastyrice` builds a release binary in rust:1.95-bookworm (same glibc as the
 # node:24-slim agent image), runs the tests of the crates this fork changes, and publishes the
 # stripped binary as release `tastyrice-<short sha>`. my-blog's scripts/agent-sandbox/codex-fetch.sh
-# downloads it, checks the sha256 and builds the agent image.
+# downloads it, checks the sha256 and builds the agent image. The same release carries the
+# user-installed client: `onigio-agent-x86_64-unknown-linux-gnu.tar.gz` (the same binary, renamed)
+# and `onigio-agent-x86_64-pc-windows-msvc.zip` (onigio-agent.exe plus the Windows sandbox helpers,
+# which it finds beside itself under their fixed names).
 name: tastyrice-build
 
 on:
@@ -54,11 +57,81 @@ jobs:
           ./dist/codex --version
           tar -C dist -czf codex-x86_64-unknown-linux-gnu.tar.gz codex
           sha256sum codex-x86_64-unknown-linux-gnu.tar.gz > codex-x86_64-unknown-linux-gnu.tar.gz.sha256
+          mkdir branded
+          cp dist/codex branded/onigio-agent
+          ./branded/onigio-agent --help | head -3 | grep -q 'onigio-agent \[OPTIONS\]'
+          tar -C branded -czf onigio-agent-x86_64-unknown-linux-gnu.tar.gz onigio-agent
+          sha256sum onigio-agent-x86_64-unknown-linux-gnu.tar.gz > onigio-agent-x86_64-unknown-linux-gnu.tar.gz.sha256
           df -h /
       - uses: actions/upload-artifact@v4
         with:
           name: codex
-          path: codex-x86_64-unknown-linux-gnu.tar.gz*
+          path: |
+            codex-x86_64-unknown-linux-gnu.tar.gz*
+            onigio-agent-x86_64-unknown-linux-gnu.tar.gz*
+          retention-days: 7
+
+  # GitHub-hosted runner (no private runners, no signing). Setup steps follow upstream's
+  # rust-release-windows.yml: MSVC developer environment and the checksummed rusty_v8 artifacts.
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+        working-directory: codex-rs
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      LIBSQLITE3_FLAGS: SQLITE_DISABLE_INTRINSIC
+      TARGET: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Configure rusty_v8 artifact overrides and verify checksums
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-pc-windows-msvc
+      - name: Configure MSVC environment
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: x86_64-pc-windows-msvc
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: windows-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
+      - name: Build onigio-agent and the sandbox helpers
+        run: |
+          cargo build --target "$TARGET" --release --locked -p codex-cli --bin codex \
+            -p codex-windows-sandbox --bin codex-command-runner --bin codex-windows-sandbox-setup
+      - name: Package
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          $release = Join-Path $env:CARGO_TARGET_DIR "$env:TARGET/release"
+          $stage = New-Item -ItemType Directory -Force -Path dist-windows
+          Copy-Item (Join-Path $release 'codex.exe') (Join-Path $stage 'onigio-agent.exe')
+          Copy-Item (Join-Path $release 'codex-command-runner.exe') $stage
+          Copy-Item (Join-Path $release 'codex-windows-sandbox-setup.exe') $stage
+          & (Join-Path $stage 'onigio-agent.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'onigio-agent.exe --version failed' }
+          $zip = 'onigio-agent-x86_64-pc-windows-msvc.zip'
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -Force
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          [System.IO.File]::WriteAllText("$zip.sha256", "$hash  $zip`n")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onigio-agent-windows
+          path: onigio-agent-x86_64-pc-windows-msvc.zip*
           retention-days: 7
 
   test:
@@ -102,7 +175,12 @@ jobs:
             run -p codex-http-client --lib client_builder
             run -p codex-app-server-transport --lib transport::remote_control -- \\
               --skip transport::remote_control::server_api::tests::response_body_timeout_is_transient
-            run -p codex-cli --bin codex site_login
+            run -p codex-cli --bin codex -- site_login site_password host_info brand remote_control allow_defaults
+            run -p codex-cli --test site_account_names
+            run -p codex-core --lib site_account_provider
+            run -p codex-app-server --lib remote_roots
+            run -p codex-app-server-daemon --lib remote_control_folders
+            run -p codex-app-server-transport --lib remote_allowed_roots
             run -p codex-core --lib unified_exec
             run -p codex-core --test all suite::unified_exec -- \\
               --skip suite::unified_exec::unified_exec_enforces_glob_deny_read_policy \\
@@ -114,7 +192,7 @@ jobs:
             if ((\${#failed[@]})); then printf 'FAILED: %s\n' \"\${failed[@]}\"; exit 1; fi"
 
   release:
-    needs: [build, test]
+    needs: [build, build-windows, test]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -122,15 +200,20 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: codex
+      - uses: actions/download-artifact@v4
+        with:
+          name: onigio-agent-windows
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           tag="tastyrice-${GITHUB_SHA::12}"
+          assets=(codex-x86_64-unknown-linux-gnu.tar.gz* onigio-agent-x86_64-unknown-linux-gnu.tar.gz*
+            onigio-agent-x86_64-pc-windows-msvc.zip*)
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" codex-x86_64-unknown-linux-gnu.tar.gz* --clobber
+            gh release upload "$tag" "${assets[@]}" --clobber
           else
-            gh release create "$tag" codex-x86_64-unknown-linux-gnu.tar.gz* --target "$GITHUB_SHA" \
+            gh release create "$tag" "${assets[@]}" --target "$GITHUB_SHA" \
               --prerelease --title "$tag" --notes "tastyrice build of ${GITHUB_SHA}"
           fi

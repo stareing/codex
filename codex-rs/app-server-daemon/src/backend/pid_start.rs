@@ -132,6 +132,12 @@ impl PidBackend {
         if let Some((key, value)) = self.command_env() {
             command.env(key, value);
         }
+        if managed_app_server && let Some(roots) = self.remote_allowed_roots_env()? {
+            command.env(
+                codex_app_server_transport::SITE_RELAY_ALLOWED_ROOTS_ENV_VAR,
+                roots,
+            );
+        }
 
         #[cfg(unix)]
         {

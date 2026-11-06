@@ -34,11 +34,38 @@ pub(crate) struct RemoteControlCommand {
     #[arg(long = "json", global = true)]
     json: bool,
 
+    /// Folder the phone or browser may work in (repeatable; default: the current folder).
+    #[arg(long = "allow", value_name = "DIR", global = true)]
+    allow: Vec<std::path::PathBuf>,
+
+    /// Do not report the host configuration summary to the site when starting.
+    #[arg(long = "no-host-info", global = true)]
+    no_host_info: bool,
+
     #[command(subcommand)]
     subcommand: Option<RemoteControlSubcommand>,
 }
 
 impl RemoteControlCommand {
+    /// `--allow` folders as canonical directories; the current folder when none is given.
+    fn allowed_roots(&self) -> anyhow::Result<Vec<std::path::PathBuf>> {
+        let requested = if self.allow.is_empty() {
+            vec![std::env::current_dir().context("failed to read the current folder")?]
+        } else {
+            self.allow.clone()
+        };
+        let mut roots: Vec<std::path::PathBuf> = Vec::with_capacity(requested.len());
+        for dir in requested {
+            let root = std::fs::canonicalize(&dir)
+                .with_context(|| format!("--allow {}: folder not found", dir.display()))?;
+            anyhow::ensure!(root.is_dir(), "--allow {}: not a folder", dir.display());
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+        Ok(roots)
+    }
+
     pub(crate) fn subcommand_name(&self) -> &'static str {
         match self.subcommand {
             None => "remote-control",
@@ -73,21 +100,56 @@ pub(crate) async fn run(
     {
         crate::site_login::ensure_signed_in().await?;
     }
+    // Best effort and concurrent with startup; `start` waits for it below so the short-lived
+    // command does not exit first.
+    let host_report = matches!(
+        command.subcommand,
+        None | Some(RemoteControlSubcommand::Start)
+    )
+    .then(|| {
+        let overrides = root_config_overrides.clone();
+        let no_host_info = command.no_host_info;
+        tokio::spawn(async move {
+            if let Ok(home) = crate::site_login::codex_home() {
+                crate::host_info::report_for_saved_account(&home, &overrides, no_host_info).await;
+            }
+        })
+    });
+    let allowed_roots = match command.subcommand {
+        None | Some(RemoteControlSubcommand::Start) => {
+            let roots = command.allowed_roots()?;
+            print_allowed_roots(command.json, &roots);
+            roots
+        }
+        _ => Vec::new(),
+    };
     match command.subcommand {
         None => {
             print_remote_control_progress(
                 command.json,
                 "Starting app-server with remote control enabled...",
             )?;
-            run_foreground_remote_control(command.json, arg0_paths, root_config_overrides).await?;
+            run_foreground_remote_control(
+                command.json,
+                arg0_paths,
+                root_config_overrides,
+                allowed_roots,
+            )
+            .await?;
         }
         Some(RemoteControlSubcommand::Start) => {
             print_remote_control_progress(
                 command.json,
                 "Starting app-server daemon with remote control enabled...",
             )?;
-            let output = codex_app_server_daemon::ensure_remote_control_ready().await?;
+            let output = codex_app_server_daemon::ensure_remote_control_ready_with_allowed_roots(
+                &allowed_roots,
+            )
+            .await?;
             print_remote_control_start_output(&output, command.json)?;
+            if let Some(report) = host_report {
+                let _ = report.await;
+            }
         }
         Some(RemoteControlSubcommand::Stop) => {
             print_remote_control_progress(command.json, "Stopping remote control...")?;
@@ -100,6 +162,18 @@ pub(crate) async fn run(
         }
     }
     Ok(())
+}
+
+fn print_allowed_roots(json: bool, roots: &[std::path::PathBuf]) {
+    if json {
+        return;
+    }
+    let list = roots
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("Remote sessions may only work in: {list} (change with --allow <DIR>)");
 }
 
 fn print_remote_control_progress(json: bool, message: &str) -> anyhow::Result<()> {
@@ -118,6 +192,7 @@ async fn run_foreground_remote_control(
     json: bool,
     arg0_paths: Arg0DispatchPaths,
     root_config_overrides: CliConfigOverrides,
+    allowed_roots: Vec<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     let socket_dir = tempfile::Builder::new()
         .prefix("codex-rc-")
@@ -133,6 +208,7 @@ async fn run_foreground_remote_control(
     let runtime_options = AppServerRuntimeOptions {
         remote_control_startup_mode: codex_app_server::RemoteControlStartupMode::EnabledEphemeral,
         install_shutdown_signal_handler: false,
+        remote_control_allowed_roots: Some(allowed_roots),
         ..Default::default()
     };
     let (stop_rx, stop_signal_task) = foreground_stop_signal();
@@ -516,6 +592,60 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    fn parse_remote_control(args: &[&str]) -> RemoteControlCommand {
+        #[derive(clap::Parser)]
+        struct Cli {
+            #[command(flatten)]
+            remote_control: RemoteControlCommand,
+        }
+        <Cli as clap::Parser>::try_parse_from(
+            std::iter::once("remote-control").chain(args.iter().copied()),
+        )
+        .expect("parse")
+        .remote_control
+    }
+
+    #[test]
+    fn allow_defaults_to_the_current_folder_and_is_canonical() {
+        let command = parse_remote_control(&[]);
+        assert_eq!(
+            command.allowed_roots().unwrap(),
+            vec![std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap()]
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let a_dotted = a.join("..").join("a");
+        let command = parse_remote_control(&[
+            "start",
+            "--allow",
+            a.to_str().unwrap(),
+            "--allow",
+            b.to_str().unwrap(),
+            "--allow",
+            a_dotted.to_str().unwrap(),
+        ]);
+        assert_eq!(command.subcommand_name(), "remote-control start");
+        assert_eq!(
+            command.allowed_roots().unwrap(),
+            vec![
+                std::fs::canonicalize(&a).unwrap(),
+                std::fs::canonicalize(&b).unwrap()
+            ]
+        );
+
+        let missing = dir.path().join("missing");
+        let command = parse_remote_control(&["--allow", missing.to_str().unwrap()]);
+        assert!(command.allowed_roots().is_err());
+        let file = dir.path().join("file");
+        std::fs::write(&file, "x").unwrap();
+        let command = parse_remote_control(&["--allow", file.to_str().unwrap()]);
+        assert!(command.allowed_roots().is_err());
+    }
 
     fn remote_control_status(
         status: RemoteControlConnectionStatus,

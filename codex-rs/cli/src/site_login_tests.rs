@@ -87,6 +87,7 @@ fn account_round_trip_and_session_link() {
         account_id: "u7".into(),
         device_id: 3,
         name: "studio".into(),
+        model: None,
     };
     account.save(home.path(), "oad_secret").unwrap();
     assert_eq!(

@@ -281,6 +281,7 @@ pub(super) async fn build_test_processor(
         rpc_transport: AppServerRpcTransport::Stdio,
         remote_control_handle: None,
         plugin_startup_tasks: Some(PluginStartupConfig::Current),
+        remote_roots: crate::remote_roots::RemoteRoots::unrestricted(),
     }));
     (processor, outgoing_rx)
 }

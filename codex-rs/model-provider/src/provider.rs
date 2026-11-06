@@ -323,6 +323,18 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager;
 
+    /// Creates a model manager for a provider that serves its own catalog at
+    /// `model_catalog_url`: `fallback` stands in for the bundled upstream presets until (and
+    /// whenever) that catalog cannot be read. Providers without remote discovery keep `fallback`
+    /// as a static catalog.
+    fn models_manager_with_own_catalog(
+        &self,
+        codex_home: PathBuf,
+        fallback: ModelsResponse,
+    ) -> SharedModelsManager {
+        self.models_manager(codex_home, Some(fallback))
+    }
+
     /// Creates a model manager with caching disabled.
     ///
     /// Providers that fetch model catalogs should override this method. The default uses an
@@ -587,6 +599,22 @@ impl ModelProvider for ConfiguredModelProvider {
                 ))
             }
         }
+    }
+
+    fn models_manager_with_own_catalog(
+        &self,
+        codex_home: PathBuf,
+        fallback: ModelsResponse,
+    ) -> SharedModelsManager {
+        let endpoint = Arc::new(OpenAiModelsEndpoint::new(
+            self.info.clone(),
+            self.auth_manager.clone(),
+            self.gateway_auth_manager.clone(),
+        ));
+        Arc::new(
+            OpenAiModelsManager::new(codex_home, endpoint, self.auth_manager.clone())
+                .with_own_catalog(fallback.models),
+        )
     }
 
     fn models_manager_without_cache(

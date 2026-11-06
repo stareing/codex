@@ -92,3 +92,59 @@ async fn api_key_discovery_startup_flag_controls_fetches_and_cached_catalogs() {
     }
     assert_eq!(endpoint.fetch_count(), 1);
 }
+
+#[tokio::test]
+async fn own_catalog_replaces_bundled_presets_and_fetches_without_the_feature_flag() {
+    let fallback = vec![remote_model("suggested", "Suggested", /*priority*/ 0)];
+    let served = vec![
+        remote_model("site-a", "Site A", /*priority*/ 0),
+        remote_model("site-b", "Site B", /*priority*/ 1),
+    ];
+    let endpoint = TestModelsEndpoint::without_refresh(vec![served.clone()]);
+    let auth = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("device-token"));
+    let manager = OpenAiModelsManager::new_without_cache(endpoint.clone(), Some(auth))
+        .with_own_catalog(fallback.clone());
+
+    // Before any fetch only the suggested model is known — never the upstream presets.
+    assert_eq!(manager.try_get_remote_models().unwrap(), fallback);
+    assert_eq!(
+        manager
+            .raw_model_catalog(RefreshStrategy::Offline, DEFAULT_HTTP_CLIENT_FACTORY)
+            .await
+            .models,
+        fallback
+    );
+    assert_eq!(endpoint.fetch_count(), 0);
+
+    // The provider's list is fetched although the API-key discovery feature is off, and is
+    // authoritative (no bundled or fallback entries merged in).
+    assert_eq!(
+        manager
+            .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
+            .await
+            .models,
+        served
+    );
+    assert_eq!(endpoint.fetch_count(), 1);
+}
+
+#[tokio::test]
+async fn own_catalog_merges_a_hidden_only_list_into_the_fallback_not_the_bundled_presets() {
+    let fallback = vec![remote_model("suggested", "Suggested", /*priority*/ 0)];
+    let hidden = vec![remote_model_with_visibility(
+        "hidden", "Hidden", /*priority*/ 1, "hide",
+    )];
+    let endpoint = TestModelsEndpoint::without_refresh(vec![hidden.clone()]);
+    let auth = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("device-token"));
+    let manager = OpenAiModelsManager::new_without_cache(endpoint, Some(auth))
+        .with_own_catalog(fallback.clone());
+    let mut expected = fallback;
+    expected.extend(hidden);
+    assert_eq!(
+        manager
+            .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
+            .await
+            .models,
+        expected
+    );
+}
