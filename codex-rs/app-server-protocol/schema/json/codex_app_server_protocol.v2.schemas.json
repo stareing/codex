@@ -8033,6 +8033,16 @@
           "description": "File modification time in Unix milliseconds when available, otherwise `0`.",
           "format": "int64",
           "type": "integer"
+        },
+        "sizeBytes": {
+          "default": null,
+          "description": "Size in bytes; absent from servers that predate it.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -8109,6 +8119,15 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "description": "Read a file from the host filesystem.",
       "properties": {
+        "maxBytes": {
+          "description": "Refuse the read when the file has more bytes than this; omitted = no limit.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "path": {
           "allOf": [
             {

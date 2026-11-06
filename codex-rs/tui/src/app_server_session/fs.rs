@@ -82,7 +82,10 @@ impl AppServerFileSystem {
                 path,
                 |request_id, path| ClientRequest::FsReadFile {
                     request_id,
-                    params: FsReadFileParams { path },
+                    params: FsReadFileParams {
+                        path,
+                        max_bytes: None,
+                    },
                 },
                 || json!({ "path": path.as_str() }),
             )

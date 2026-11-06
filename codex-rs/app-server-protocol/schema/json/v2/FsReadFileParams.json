@@ -8,6 +8,15 @@
   },
   "description": "Read a file from the host filesystem.",
   "properties": {
+    "maxBytes": {
+      "description": "Refuse the read when the file has more bytes than this; omitted = no limit.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "path": {
       "allOf": [
         {
