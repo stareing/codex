@@ -15,7 +15,6 @@ use codex_cli::read_api_key_from_stdin;
 use codex_cli::run_login_status;
 use codex_cli::run_login_with_access_token;
 use codex_cli::run_login_with_api_key;
-use codex_cli::run_login_with_chatgpt;
 use codex_cli::run_login_with_device_code;
 use codex_cli::run_logout;
 use codex_cloud_tasks::Cli as CloudTasksCli;
@@ -73,6 +72,7 @@ mod queue_cmd;
 mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
+mod site_login;
 mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;
@@ -500,12 +500,14 @@ struct LoginCommand {
     config_overrides: CliConfigOverrides,
 
     #[arg(
+        hide = true,
         long = "with-api-key",
         help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)"
     )]
     with_api_key: bool,
 
     #[arg(
+        hide = true,
         long = "with-access-token",
         help = "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | codex login --with-access-token`)"
     )]
@@ -521,8 +523,12 @@ struct LoginCommand {
     )]
     api_key: Option<String>,
 
-    #[arg(long = "device-auth")]
+    #[arg(long = "device-auth", hide = true)]
     use_device_code: bool,
+
+    /// Site to sign in to (default: this build's site, or $AGENT_SITE_URL).
+    #[arg(long = "site", value_name = "URL")]
+    site: Option<String>,
 
     /// EXPERIMENTAL: Use custom OAuth issuer base URL (advanced)
     /// Override the OAuth issuer base URL (advanced)
@@ -1562,6 +1568,10 @@ async fn cli_main(
             );
             match login_cli.action {
                 Some(LoginSubcommand::Status) => {
+                    if let Some(status) = site_login::site_status() {
+                        eprintln!("{status}");
+                        std::process::exit(0);
+                    }
                     run_login_status(login_cli.config_overrides).await;
                 }
                 None => {
@@ -1589,7 +1599,8 @@ async fn cli_main(
                         let access_token = read_access_token_from_stdin();
                         run_login_with_access_token(login_cli.config_overrides, access_token).await;
                     } else {
-                        run_login_with_chatgpt(login_cli.config_overrides).await;
+                        // Site accounts are the default sign-in (REMOTE_CONTROL.md R7).
+                        site_login::run_login(login_cli.site).await;
                     }
                 }
             }
@@ -1604,6 +1615,14 @@ async fn cli_main(
                 &mut logout_cli.config_overrides,
                 root_config_overrides.clone(),
             );
+            match site_login::run_site_logout().await {
+                Ok(true) => std::process::exit(0),
+                Ok(false) => {}
+                Err(err) => {
+                    eprintln!("Error: {err:#}");
+                    std::process::exit(1);
+                }
+            }
             run_logout(logout_cli.config_overrides).await;
         }
         Some(Subcommand::Completion(completion_cli)) => {

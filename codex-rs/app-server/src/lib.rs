@@ -846,8 +846,8 @@ pub async fn run_main_with_transport_options(
         ));
     }
 
-    // Onigio fork: the desktop client names its relay and device token through the environment.
-    let site_relay = SiteRelay::from_env()?;
+    // Site relay: the launcher's SITE_RELAY_* variables, else the account saved by `login`.
+    let site_relay = SiteRelay::from_env_or_account(config.codex_home.as_path())?;
     let (remote_control_accept_handle, remote_control_handle) = start_remote_control(
         RemoteControlStartConfig {
             remote_control_url: site_relay.as_ref().map_or_else(
