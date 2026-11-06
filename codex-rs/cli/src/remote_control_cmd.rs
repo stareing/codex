@@ -199,7 +199,8 @@ async fn run_foreground_remote_control(
         .tempdir_in("/tmp")
         .or_else(|_| tempfile::tempdir())
         .context("failed to create private app-server socket directory")?;
-    let socket_path = socket_dir.path().join("rc.sock");
+    // Not in the tempdir itself: on Windows it has an inherited ACL and the app-server refuses it.
+    let socket_path = codex_uds::socket_path_in_temp_dir(socket_dir.path(), "rc.sock");
     let socket_path = AbsolutePathBuf::from_absolute_path(&socket_path)
         .context("private app-server socket path was not absolute")?;
     let transport = AppServerTransport::UnixSocket {

@@ -9,6 +9,7 @@ pub use daemon_directory::shared_daemon_socket_directory;
 
 use std::io::Result as IoResult;
 use std::path::Path;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
@@ -23,6 +24,15 @@ use tokio::io::ReadBuf;
 /// changing permissions cannot revoke access held through preexisting handles.
 pub async fn prepare_private_socket_directory(socket_dir: impl AsRef<Path>) -> IoResult<()> {
     platform::prepare_private_socket_directory(socket_dir.as_ref()).await
+}
+
+/// Where a socket goes when its directory is a fresh temporary directory: in a child directory
+/// that the listener creates itself (`prepare_private_socket_directory`), never in the temporary
+/// directory. On Windows a temporary directory inherits its parent's ACL, and an existing directory
+/// is only validated, never repaired, so a socket bound directly in it is always refused with
+/// "socket directory is not private to the current user".
+pub fn socket_path_in_temp_dir(temp_dir: &Path, socket_name: &str) -> PathBuf {
+    temp_dir.join("private").join(socket_name)
 }
 
 /// Returns whether `socket_path` points at a stale Unix socket rendezvous path.
