@@ -8,6 +8,33 @@ use super::*;
 
 #[cfg(windows)]
 #[tokio::test]
+async fn socket_in_a_temp_dir_goes_in_a_child_the_listener_creates() {
+    // The foreground remote-control socket (cli remote_control_cmd): binding straight in a
+    // tempdir is refused on Windows, its ACL is inherited.
+    let temp = tempfile::TempDir::new().expect("temp directory");
+    assert_eq!(
+        prepare_private_socket_directory(temp.path())
+            .await
+            .unwrap_err()
+            .kind(),
+        ErrorKind::PermissionDenied,
+    );
+    let socket_path = socket_path_in_temp_dir(temp.path(), "rc.sock");
+    assert_eq!(socket_path.parent().unwrap().parent(), Some(temp.path()));
+    prepare_private_socket_directory(socket_path.parent().unwrap())
+        .await
+        .unwrap();
+    let (_validated, _guard) = validate_private_socket_path(&socket_path).unwrap();
+}
+
+#[test]
+fn socket_path_in_temp_dir_is_a_child_of_a_child() {
+    let path = socket_path_in_temp_dir(Path::new("/t/codex-rc-x"), "rc.sock");
+    assert_eq!(path, Path::new("/t/codex-rc-x/private/rc.sock"));
+}
+
+#[cfg(windows)]
+#[tokio::test]
 async fn private_directory_rejects_volume_roots() {
     // A nonexistent volume keeps this regression safe even if root validation breaks.
     let root = Path::new(r"\\?\Volume{00000000-0000-0000-0000-000000000000}\");
