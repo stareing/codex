@@ -1245,6 +1245,7 @@ fn fs_get_metadata_response_round_trips_minimal_fields() {
         is_symlink: false,
         created_at_ms: 123,
         modified_at_ms: 456,
+        size_bytes: None,
     };
 
     let value = serde_json::to_value(&response).expect("serialize fs/getMetadata response");
@@ -1256,6 +1257,7 @@ fn fs_get_metadata_response_round_trips_minimal_fields() {
             "isSymlink": false,
             "createdAtMs": 123,
             "modifiedAtMs": 456,
+            "sizeBytes": null,
         })
     );
 
@@ -1284,9 +1286,29 @@ fn fs_read_file_response_round_trips_base64_data() {
 }
 
 #[test]
+fn fs_get_metadata_response_without_size_from_an_older_server_decodes() {
+    let decoded = serde_json::from_value::<FsGetMetadataResponse>(json!({
+        "isDirectory": false, "isFile": true, "isSymlink": false,
+        "createdAtMs": 1, "modifiedAtMs": 2,
+    }))
+    .expect("decode fs/getMetadata response without sizeBytes");
+    assert_eq!(decoded.size_bytes, None);
+}
+
+#[test]
+fn fs_read_file_params_with_max_bytes() {
+    let params: FsReadFileParams = serde_json::from_value(json!({
+        "path": absolute_path_string("tmp/example.txt"), "maxBytes": 4096,
+    }))
+    .expect("decode fs/readFile params");
+    assert_eq!(params.max_bytes, Some(4096));
+}
+
+#[test]
 fn fs_read_file_params_round_trip() {
     let params = FsReadFileParams {
         path: absolute_path("tmp/example.txt"),
+        max_bytes: None,
     };
 
     let value = serde_json::to_value(&params).expect("serialize fs/readFile params");

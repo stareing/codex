@@ -30,6 +30,7 @@ use codex_exec_server::EnvironmentManager;
 use codex_exec_server::ExecutorFileSystem;
 use codex_exec_server::RemoveOptions;
 use codex_utils_path_uri::PathUri;
+use futures::StreamExt;
 use std::io;
 use std::sync::Arc;
 
@@ -66,11 +67,14 @@ impl FsRequestProcessor {
         params: FsReadFileParams,
     ) -> Result<FsReadFileResponse, JSONRPCErrorError> {
         let path = PathUri::from_abs_path(&params.path);
-        let bytes = self
-            .file_system()?
-            .read_file(&path, Default::default(), /*sandbox*/ None)
-            .await
-            .map_err(map_fs_error)?;
+        let bytes = match params.max_bytes {
+            None => self
+                .file_system()?
+                .read_file(&path, Default::default(), /*sandbox*/ None)
+                .await
+                .map_err(map_fs_error)?,
+            Some(max_bytes) => read_at_most(self.file_system()?.as_ref(), &path, max_bytes).await?,
+        };
         Ok(FsReadFileResponse {
             data_base64: STANDARD.encode(bytes),
         })
@@ -128,6 +132,7 @@ impl FsRequestProcessor {
             is_symlink: metadata.is_symlink,
             created_at_ms: metadata.created_at_ms,
             modified_at_ms: metadata.modified_at_ms,
+            size_bytes: Some(metadata.size),
         })
     }
 
@@ -210,6 +215,30 @@ impl FsRequestProcessor {
         self.file_system()?;
         self.fs_watch_manager.unwatch(connection_id, params).await
     }
+}
+
+/// The file's bytes when it has at most `max_bytes`; stops reading (and refuses) at the first byte
+/// past the limit, so a large file never sits whole in memory or in the reply.
+async fn read_at_most(
+    file_system: &dyn ExecutorFileSystem,
+    path: &PathUri,
+    max_bytes: u64,
+) -> Result<Vec<u8>, JSONRPCErrorError> {
+    let mut stream = file_system
+        .read_file_stream(path, /*sandbox*/ None)
+        .await
+        .map_err(map_fs_error)?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(map_fs_error)?;
+        if bytes.len() as u64 + chunk.len() as u64 > max_bytes {
+            return Err(invalid_request(format!(
+                "fs/readFile: the file is larger than maxBytes ({max_bytes})"
+            )));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 fn map_fs_error(err: io::Error) -> JSONRPCErrorError {

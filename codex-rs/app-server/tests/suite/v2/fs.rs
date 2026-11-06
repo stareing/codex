@@ -101,6 +101,7 @@ async fn fs_get_metadata_returns_only_used_fields() -> Result<()> {
             "isFile".to_string(),
             "isSymlink".to_string(),
             "modifiedAtMs".to_string(),
+            "sizeBytes".to_string(),
         ]
     );
 
@@ -113,6 +114,7 @@ async fn fs_get_metadata_returns_only_used_fields() -> Result<()> {
             is_symlink: false,
             created_at_ms: stat.created_at_ms,
             modified_at_ms: stat.modified_at_ms,
+            size_bytes: Some(std::fs::metadata(&file_path)?.len()),
         }
     );
     assert!(
@@ -139,10 +141,48 @@ async fn fs_methods_return_error_when_local_environment_is_disabled() -> Result<
     let read_id = mcp
         .send_fs_read_file_request(codex_app_server_protocol::FsReadFileParams {
             path: absolute_path(absolute_file),
+            max_bytes: None,
         })
         .await?;
     expect_error_message(&mut mcp, read_id, "local filesystem is not configured").await?;
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fs_read_file_refuses_a_file_larger_than_max_bytes() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let file_path = codex_home.path().join("five.txt");
+    std::fs::write(&file_path, "hello")?;
+    let mut mcp = initialized_mcp(&codex_home).await?;
+
+    let exact_id = mcp
+        .send_fs_read_file_request(codex_app_server_protocol::FsReadFileParams {
+            path: absolute_path(file_path.clone()),
+            max_bytes: Some(5),
+        })
+        .await?;
+    let exact: FsReadFileResponse = to_response(
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(exact_id)),
+        )
+        .await??,
+    )?;
+    assert_eq!(exact.data_base64, STANDARD.encode("hello"));
+
+    let over_id = mcp
+        .send_fs_read_file_request(codex_app_server_protocol::FsReadFileParams {
+            path: absolute_path(file_path),
+            max_bytes: Some(4),
+        })
+        .await?;
+    expect_error_message(
+        &mut mcp,
+        over_id,
+        "fs/readFile: the file is larger than maxBytes (4)",
+    )
+    .await?;
     Ok(())
 }
 
@@ -226,6 +266,7 @@ async fn fs_methods_cover_current_fs_utils_surface() -> Result<()> {
     let read_request_id = mcp
         .send_fs_read_file_request(codex_app_server_protocol::FsReadFileParams {
             path: absolute_path(nested_file.clone()),
+            max_bytes: None,
         })
         .await?;
     let read_response: FsReadFileResponse = to_response(
@@ -349,6 +390,7 @@ async fn fs_write_file_accepts_base64_bytes() -> Result<()> {
     let read_request_id = mcp
         .send_fs_read_file_request(codex_app_server_protocol::FsReadFileParams {
             path: absolute_path(file_path),
+            max_bytes: None,
         })
         .await?;
     let read_response: FsReadFileResponse = to_response(

@@ -11,6 +11,10 @@ use serde::Serialize;
 pub struct FsReadFileParams {
     /// Absolute path to read.
     pub path: AbsolutePathBuf,
+    /// Refuse the read when the file has more bytes than this; omitted = no limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub max_bytes: Option<u64>,
 }
 
 /// Base64-encoded file contents returned by `fs/readFile`.
@@ -83,6 +87,10 @@ pub struct FsGetMetadataResponse {
     /// File modification time in Unix milliseconds when available, otherwise `0`.
     #[ts(type = "number")]
     pub modified_at_ms: i64,
+    /// Size in bytes; absent from servers that predate it.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub size_bytes: Option<u64>,
 }
 
 /// List direct child names for a directory.

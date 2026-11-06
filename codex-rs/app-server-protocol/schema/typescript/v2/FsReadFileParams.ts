@@ -10,4 +10,8 @@ export type FsReadFileParams = {
 /**
  * Absolute path to read.
  */
-path: AbsolutePathBuf, };
+path: AbsolutePathBuf,
+/**
+ * Refuse the read when the file has more bytes than this; omitted = no limit.
+ */
+maxBytes?: bigint | null, };
