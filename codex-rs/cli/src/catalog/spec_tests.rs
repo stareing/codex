@@ -236,3 +236,171 @@ fn a_skill_comes_either_as_text_or_as_a_bundle() {
         .is_err()
     );
 }
+
+fn tools_stdio_json() -> serde_json::Value {
+    serde_json::json!({
+        "ref": "tools:mcp/io.github.acme/weather", "kind": "mcp", "slug": "weather",
+        "name": "Weather", "version": "1.2.0", "trust": "unreviewed",
+        "source_url": "https://github.com/acme/weather",
+        "mcp": {"transport": "stdio", "command": "npx",
+                "args": ["-y", "@acme/weather@1.2.0", "--port", "3000"],
+                "env": {"REGION": "eu"}, "secret_env": ["API_KEY"], "url": null,
+                "headers": {}, "secret_headers": {}},
+        "skill": null, "bundle": null, "install_instructions": null
+    })
+}
+
+#[test]
+fn tool_directory_references_keep_their_key() {
+    for (raw, kind, key) in [
+        (
+            "tools:mcp/io.github.acme/weather",
+            Kind::Mcp,
+            "io.github.acme/weather",
+        ),
+        (
+            "tools:skill/Owner/Repo.Name",
+            Kind::Skill,
+            "Owner/Repo.Name",
+        ),
+        (
+            " tools:cli/burntsushi/ripgrep ",
+            Kind::Cli,
+            "burntsushi/ripgrep",
+        ),
+        ("tools:mcp/a..b/c_d-e", Kind::Mcp, "a..b/c_d-e"),
+    ] {
+        let parsed = parse_ref(raw).unwrap();
+        assert_eq!(parsed, CatalogRef::tools(kind, key), "{raw}");
+        assert_eq!(parsed.to_string(), raw.trim());
+    }
+    for bad in [
+        "tools:mcp/weather",
+        "tools:mcp/a/b/c",
+        "tools:mcp//b",
+        "tools:mcp/a/",
+        "tools:plugin/a/b",
+        "tools:mcp/a b/c",
+        "tools:mcp/a/b?x=1",
+        "store:cli/x",
+    ] {
+        assert!(parse_ref(bad).is_err(), "{bad:?} should be refused");
+    }
+    let long = format!("tools:mcp/{}/{}", "a".repeat(150), "b".repeat(50));
+    assert!(parse_ref(&long).is_err(), "over 200 characters in all");
+    assert!(parse_ref(&format!("tools:mcp/{}/b", "a".repeat(151))).is_err());
+}
+
+#[test]
+fn a_tool_directory_spec_validates_and_answers_its_reference() {
+    let spec = spec_from(tools_stdio_json());
+    assert_eq!(spec.validate(), Ok(()));
+    assert!(!spec.reviewed());
+    assert!(spec.answers(&parse_ref("tools:mcp/io.github.acme/weather").unwrap()));
+    // GitHub keys are case-insensitive; the site answers lower-cased.
+    assert!(spec.answers(&parse_ref("tools:mcp/IO.github.Acme/Weather").unwrap()));
+    for other in [
+        "tools:mcp/io.github.acme/other",
+        "tools:skill/io.github.acme/weather",
+        "store:mcp/weather",
+        "weather",
+    ] {
+        assert!(!spec.answers(&parse_ref(other).unwrap()), "{other}");
+    }
+    // A store spec still answers its store and bare references only.
+    let store = spec_from(stdio_spec_json());
+    assert!(store.answers(&parse_ref("context7").unwrap()));
+    assert!(store.answers(&parse_ref("store:mcp/context7").unwrap()));
+    assert!(!store.answers(&parse_ref("store:skill/context7").unwrap()));
+    assert!(!store.answers(&parse_ref("tools:mcp/x/context7").unwrap()));
+}
+
+#[test]
+fn tool_directory_specs_with_mismatched_or_unusable_fields_are_refused() {
+    type Mutation = Box<dyn Fn(&mut serde_json::Value)>;
+    let cases: Vec<(&str, Mutation)> = vec![
+        (
+            "kind differs from ref",
+            Box::new(|v| v["ref"] = "tools:skill/io.github.acme/weather".into()),
+        ),
+        (
+            "ref not a reference",
+            Box::new(|v| v["ref"] = "tools:mcp/weather".into()),
+        ),
+        (
+            "slug with a dot",
+            Box::new(|v| v["slug"] = "weather.tool".into()),
+        ),
+        ("slug traversal", Box::new(|v| v["slug"] = "../x".into())),
+        (
+            "source not a web page",
+            Box::new(|v| v["source_url"] = "javascript:alert(1)".into()),
+        ),
+        (
+            "literal header on stdio",
+            Box::new(|v| v["mcp"]["headers"] = serde_json::json!({"X": "y"})),
+        ),
+    ];
+    for (label, mutate) in cases {
+        let mut value = tools_stdio_json();
+        mutate(&mut value);
+        assert!(
+            spec_from(value).validate().is_err(),
+            "{label} should be refused"
+        );
+    }
+}
+
+#[test]
+fn headers_and_install_instructions_are_optional_for_older_answers() {
+    // The P1 answer shape (no `headers`, no `install_instructions`) still parses and validates.
+    let spec = spec_from(stdio_spec_json());
+    assert_eq!(spec.install_instructions, None);
+    assert!(spec.mcp.unwrap().headers.is_empty());
+
+    let mut http = serde_json::json!({
+        "ref": "tools:mcp/io.github.acme/remote", "kind": "mcp", "slug": "remote", "name": "R",
+        "version": "1", "trust": "unreviewed",
+        "mcp": {"transport": "http", "url": "https://mcp.acme.dev/mcp",
+                "headers": {"X-Client": "onigio"}, "secret_headers": {"X-Key": "REMOTE_X_KEY"}},
+        "install_instructions": null,
+    });
+    assert_eq!(spec_from(http.clone()).validate(), Ok(()));
+    http["mcp"]["headers"] = serde_json::json!({"X-Key": "dup"});
+    assert!(
+        spec_from(http.clone()).validate().is_err(),
+        "a header both literal and secret"
+    );
+    http["mcp"]["headers"] = serde_json::json!({"Bad Header": "v"});
+    assert!(spec_from(http.clone()).validate().is_err());
+    http["mcp"]["headers"] = serde_json::json!({"X-Client": "a\r\nX-Evil: 1"});
+    assert!(spec_from(http).validate().is_err());
+}
+
+#[test]
+fn a_command_line_tool_needs_instructions_and_nothing_to_run() {
+    let cli = |instructions: serde_json::Value| {
+        spec_from(serde_json::json!({
+            "ref": "tools:cli/burntsushi/ripgrep", "kind": "cli", "slug": "ripgrep",
+            "name": "ripgrep", "version": "14.1.0", "trust": "unreviewed",
+            "source_url": "https://github.com/burntsushi/ripgrep",
+            "mcp": null, "skill": null, "bundle": null, "install_instructions": instructions,
+        }))
+    };
+    let ok = cli(serde_json::json!({"url": "https://github.com/burntsushi/ripgrep#readme"}));
+    assert_eq!(ok.validate(), Ok(()));
+    assert_eq!(cli(serde_json::json!({"url": null})).validate(), Ok(()));
+    assert!(cli(serde_json::Value::Null).validate().is_err());
+    assert!(
+        cli(serde_json::json!({"url": "file:///etc/passwd"}))
+            .validate()
+            .is_err()
+    );
+    let mut with_mcp = serde_json::json!({
+        "ref": "tools:cli/a/b", "kind": "cli", "slug": "b", "name": "b", "version": "1",
+        "mcp": {"transport": "stdio", "command": "b"}, "install_instructions": {"url": null},
+    });
+    assert!(spec_from(with_mcp.clone()).validate().is_err());
+    with_mcp["mcp"] = serde_json::Value::Null;
+    assert_eq!(spec_from(with_mcp).validate(), Ok(()));
+}

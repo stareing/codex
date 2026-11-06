@@ -136,6 +136,7 @@ assert_cmd = { workspace = true }
 assert_matches = { workspace = true }
 codex-utils-cargo-bin = { workspace = true }
 codex-utils-pty = { workspace = true }
+dotenvy = { workspace = true }
 flate2 = { workspace = true }
 insta = { workspace = true }
 jsonwebtoken = { workspace = true }

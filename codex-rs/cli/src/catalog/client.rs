@@ -68,6 +68,36 @@ const HINTS: &[(&str, &str)] = &[
         "invalid_template",
         "The item's launch settings are incomplete on the site; it cannot be installed yet.",
     ),
+    // Tool directory refusals (`tools:` references); the site's `detail` says why.
+    (
+        "unsupported_registry",
+        "Only npm and PyPI packages from the tool directory can be installed; set it up by hand from its source instead.",
+    ),
+    (
+        "unpinned_version",
+        "Only entries with an exact package version can be installed.",
+    ),
+    (
+        "needs_input",
+        "It needs settings this command cannot ask for yet; set it up by hand from its source.",
+    ),
+    (
+        "needs_review",
+        "It has to be reviewed before it can be installed from the tool directory.",
+    ),
+    ("no_install_target", "The listing names nothing to install."),
+    (
+        "pending_sync",
+        "Try again after the site's next directory sync.",
+    ),
+    (
+        "not_installable",
+        "Follow the official instructions to install it.",
+    ),
+    (
+        "query_too_short",
+        "Searching the tool directory needs at least 3 characters.",
+    ),
 ];
 
 /// A failed catalog operation: a refusal code, readable detail, and (for `ambiguous_ref`) the
@@ -78,6 +108,8 @@ pub(crate) struct CatalogError {
     pub(crate) code: String,
     pub(crate) detail: String,
     pub(crate) candidates: Vec<String>,
+    /// For `not_installable`: the official install instructions, when known.
+    pub(crate) instructions_url: Option<String>,
 }
 
 impl CatalogError {
@@ -87,6 +119,7 @@ impl CatalogError {
             code: code.to_string(),
             detail: detail.into(),
             candidates: Vec::new(),
+            instructions_url: None,
         }
     }
 
@@ -123,6 +156,7 @@ impl CatalogError {
             code,
             detail: text("detail").unwrap_or_default(),
             candidates,
+            instructions_url: None,
         }
     }
 
@@ -160,13 +194,17 @@ pub(crate) struct SearchHit {
     pub(crate) reference: String,
     pub(crate) kind: String,
     #[serde(default)]
-    pub(crate) name: String,
+    pub(crate) slug: String,
     #[serde(default)]
+    pub(crate) name: String,
+    /// `null` for some tool directory rows.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub(crate) summary: String,
     #[serde(default)]
     pub(crate) trust: String,
+    /// `null` for tool directory rows (the site does not count those).
     #[serde(default)]
-    pub(crate) installs: u64,
+    pub(crate) installs: Option<u64>,
     #[serde(default = "default_true")]
     pub(crate) supported: bool,
     #[serde(default)]
@@ -175,6 +213,10 @@ pub(crate) struct SearchHit {
 
 fn default_true() -> bool {
     true
+}
+
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    Option::<String>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -345,13 +387,15 @@ impl CatalogClient {
         .await
     }
 
+    /// `source` is `store`, `tools` or `all` (the site's default is `store`).
     pub(crate) async fn search(
         &self,
         query: &str,
         kind: Option<&str>,
+        source: &str,
         page: Option<u32>,
     ) -> Result<SearchPage, CatalogError> {
-        let mut params = vec![("q", query.to_string())];
+        let mut params = vec![("q", query.to_string()), ("source", source.to_string())];
         if let Some(kind) = kind {
             params.push(("kind", kind.to_string()));
         }

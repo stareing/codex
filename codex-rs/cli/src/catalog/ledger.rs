@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::spec::Kind;
+use super::spec::TRUST_REVIEWED;
 
 pub(crate) const LEDGER_FILE: &str = "onigio-installed.json";
 const LEDGER_FORMAT: u32 = 1;
@@ -16,7 +17,8 @@ const MAX_LEDGER_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct LedgerEntry {
-    /// Canonical reference, e.g. `store:mcp/context7`.
+    /// The reference exactly as the site names it, e.g. `store:mcp/context7` or
+    /// `tools:mcp/io.github.acme/weather`.
     #[serde(rename = "ref")]
     pub(crate) reference: String,
     pub(crate) kind: Kind,
@@ -35,6 +37,24 @@ pub(crate) struct LedgerEntry {
     pub(crate) installed_at: String,
     #[serde(default = "default_enabled")]
     pub(crate) enabled: bool,
+    /// The spec's `trust` when installed (empty in ledgers written before it was kept).
+    ///
+    /// An `update` (not implemented yet) must show the new command and ask again before
+    /// reinstalling any entry for which [`LedgerEntry::reconfirm_on_update`] holds; it never
+    /// upgrades those silently (PLUGINS.md §10 item 7).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) trust: String,
+    /// Variables this install wrote to `$CODEX_HOME/.env` (secret header values), removed with it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) env_file: Vec<String>,
+}
+
+impl LedgerEntry {
+    /// Not reviewed by the site (a `tools:` entry, or an unknown trust): any reinstall, update
+    /// included, needs the user's confirmation again.
+    pub(crate) fn reconfirm_on_update(&self) -> bool {
+        self.trust != TRUST_REVIEWED || self.reference.starts_with("tools:")
+    }
 }
 
 fn default_enabled() -> bool {
