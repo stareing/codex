@@ -1,6 +1,7 @@
 //! Onigio fork: remote control against the site relay with only a device token.
 
 use super::*;
+use pretty_assertions::assert_eq;
 
 async fn signed_out_auth_manager(codex_home: &TempDir) -> Arc<AuthManager> {
     AuthManager::shared(
