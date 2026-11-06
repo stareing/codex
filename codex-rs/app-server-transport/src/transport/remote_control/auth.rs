@@ -33,6 +33,7 @@ pub(super) struct RemoteControlRecovery {
 }
 
 impl RemoteControlAuth {
+    #[cfg(test)]
     pub(super) fn capture(manager: Arc<AuthManager>) -> (Self, bool) {
         Self::capture_with_site_relay(manager, /*site_relay*/ None)
     }
@@ -92,11 +93,14 @@ impl RemoteControlAuth {
 }
 
 pub(super) const REMOTE_CONTROL_ACCOUNT_ID_HEADER: &str = "chatgpt-account-id";
+/// Account header a site relay receives instead of the upstream one (`site_relay.rs`).
+pub(super) const SITE_RELAY_ACCOUNT_ID_HEADER: &str = "x-relay-account-id";
 
 pub(super) struct RemoteControlConnectionAuth {
     pub(super) http_client_factory: codex_http_client::HttpClientFactory,
     pub(super) auth_provider: SharedAuthProvider,
     pub(super) account_id: String,
+    pub(super) account_header: &'static str,
 }
 
 impl RemoteControlConnectionAuth {
@@ -104,7 +108,7 @@ impl RemoteControlConnectionAuth {
         let mut headers = HeaderMap::new();
         self.auth_provider.add_auth_headers(&mut headers);
         headers.insert(
-            REMOTE_CONTROL_ACCOUNT_ID_HEADER,
+            self.account_header,
             HeaderValue::from_str(&self.account_id).map_err(|err| {
                 io::Error::new(
                     ErrorKind::InvalidInput,
@@ -137,6 +141,7 @@ fn load_site_relay(
         http_client_factory: auth_manager.http_client_factory(),
         auth_provider: Arc::new(SiteRelayAuthProvider::new(&token)?),
         account_id: site_relay.account_id().to_string(),
+        account_header: SITE_RELAY_ACCOUNT_ID_HEADER,
     })
 }
 
@@ -184,6 +189,7 @@ async fn load_auth_manager(
                 "remote control enrollment is waiting for a ChatGPT account id",
             )
         })?,
+        account_header: REMOTE_CONTROL_ACCOUNT_ID_HEADER,
     })
 }
 
@@ -310,6 +316,7 @@ mod tests {
                 account_ids: provider_account_ids,
             }),
             account_id: account_id.to_string(),
+            account_header: REMOTE_CONTROL_ACCOUNT_ID_HEADER,
         }
     }
 

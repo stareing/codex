@@ -1,6 +1,7 @@
 use super::*;
 use crate::transport::remote_control::auth::REMOTE_CONTROL_ACCOUNT_ID_HEADER;
 use crate::transport::remote_control::auth::RemoteControlAuth;
+use crate::transport::remote_control::auth::SITE_RELAY_ACCOUNT_ID_HEADER;
 use crate::transport::remote_control::auth::load_remote_control_auth;
 use crate::transport::remote_control::auth::recover_remote_control_auth;
 use crate::transport::remote_control::protocol::normalize_remote_control_url;
@@ -149,7 +150,7 @@ fn only_the_configured_relay_host_is_added_to_the_allowlist() {
     let relay = relay(&dir);
 
     normalize_remote_control_url("https://relay.onigio.com/")
-        .expect_err("upstream still rejects hosts outside chatgpt.com");
+        .expect_err("without a relay, upstream still rejects other hosts");
     let target = normalize_remote_control_url_trusting("https://relay.onigio.com/", Some(&relay))
         .expect("the configured relay is trusted");
     assert_eq!(
@@ -167,7 +168,7 @@ fn only_the_configured_relay_host_is_added_to_the_allowlist() {
 }
 
 #[tokio::test]
-async fn site_relay_auth_uses_the_device_token_without_a_chatgpt_login() {
+async fn site_relay_auth_uses_the_device_token_without_an_upstream_login() {
     let dir = TempDir::new().expect("temp dir should create");
     let codex_home = TempDir::new().expect("temp dir should create");
     let relay = Arc::new(relay(&dir));
@@ -199,10 +200,12 @@ async fn site_relay_auth_uses_the_device_token_without_a_chatgpt_login() {
     );
     assert_eq!(
         headers
-            .get(REMOTE_CONTROL_ACCOUNT_ID_HEADER)
+            .get(SITE_RELAY_ACCOUNT_ID_HEADER)
             .and_then(|value| value.to_str().ok()),
         Some("u42")
     );
+    // The relay gets its own neutral account header, never the upstream one.
+    assert_eq!(headers.get(REMOTE_CONTROL_ACCOUNT_ID_HEADER), None);
 
     // The launcher rotates the token in place; the next load sends the new one.
     std::fs::write(dir.path().join("device-token"), "dt_second").expect("token should write");
@@ -225,13 +228,11 @@ async fn site_relay_auth_uses_the_device_token_without_a_chatgpt_login() {
 }
 
 #[tokio::test]
-async fn chatgpt_mode_is_unchanged_when_no_relay_is_configured() {
+async fn upstream_mode_is_unchanged_when_no_relay_is_configured() {
     let manager = codex_core::test_support::auth_manager_from_auth(
         codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
     );
     let (auth, authenticated) = RemoteControlAuth::capture(manager);
     assert!(authenticated);
     assert!(auth.site_relay().is_none());
-    normalize_remote_control_url("https://chatgpt.com/backend-api")
-        .expect("upstream hosts still pass");
 }

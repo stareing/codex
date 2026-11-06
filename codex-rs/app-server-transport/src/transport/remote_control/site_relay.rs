@@ -1,8 +1,10 @@
-//! Onigio fork: remote control through the site's own relay instead of ChatGPT.
+//! Site relay: remote control through a relay run by the site the user signed in to, instead of
+//! the upstream hosted service.
 //!
-//! The desktop client launches `codex app-server --remote-control` with the three
-//! `CODEX_SITE_RELAY_*` variables. Enroll and refresh then go to the named relay (any HTTPS host,
-//! or HTTP on loopback) with `Authorization: Bearer <device token>`, and no ChatGPT login is needed.
+//! The desktop client launches `app-server --remote-control` with the three `SITE_RELAY_*`
+//! variables. Enroll and refresh then go to the named relay (any HTTPS host, or HTTP on loopback)
+//! with `Authorization: Bearer <device token>` and the account in `x-relay-account-id`; no upstream
+//! account sign-in is needed.
 //! The token is re-read from its file for every request, so the client can rotate it in place.
 //! When none of the variables is set, remote control behaves exactly as upstream.
 
@@ -17,9 +19,9 @@ use std::path::PathBuf;
 use url::Host;
 use url::Url;
 
-pub const SITE_RELAY_URL_ENV_VAR: &str = "CODEX_SITE_RELAY_URL";
-pub const SITE_RELAY_TOKEN_FILE_ENV_VAR: &str = "CODEX_SITE_RELAY_TOKEN_FILE";
-pub const SITE_RELAY_ACCOUNT_ID_ENV_VAR: &str = "CODEX_SITE_RELAY_ACCOUNT_ID";
+pub const SITE_RELAY_URL_ENV_VAR: &str = "SITE_RELAY_URL";
+pub const SITE_RELAY_TOKEN_FILE_ENV_VAR: &str = "SITE_RELAY_TOKEN_FILE";
+pub const SITE_RELAY_ACCOUNT_ID_ENV_VAR: &str = "SITE_RELAY_ACCOUNT_ID";
 
 const MAX_TOKEN_BYTES: u64 = 4096;
 const MAX_ACCOUNT_ID_CHARS: usize = 64;
@@ -137,7 +139,7 @@ impl SiteRelay {
     }
 
     /// Reads the device token; `PermissionDenied` when it is missing, empty or malformed, so the
-    /// transport treats it like a signed-out ChatGPT account and waits instead of retrying hot.
+    /// transport treats it like a signed-out upstream account and waits instead of retrying hot.
     pub(super) fn read_token(&self) -> io::Result<String> {
         let denied = |reason: &str| {
             io::Error::new(
