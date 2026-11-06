@@ -2559,6 +2559,7 @@ dependencies = [
  "codex-websocket-auth",
  "codex-windows-sandbox",
  "crossterm",
+ "dotenvy",
  "flate2",
  "futures",
  "gethostname",

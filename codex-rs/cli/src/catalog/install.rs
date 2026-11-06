@@ -17,6 +17,7 @@ use serde::Serialize;
 use super::client::CatalogClient;
 use super::client::CatalogError;
 use super::client::SiteInstalled;
+use super::env_file;
 use super::ledger::Ledger;
 use super::ledger::LedgerEntry;
 use super::ledger::Lookup;
@@ -51,9 +52,11 @@ pub(crate) struct InstallOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct InstallOutcome {
     pub(crate) entry: LedgerEntry,
-    /// Environment variables an HTTP server reads its header secrets from that are not set now.
-    pub(crate) unset_header_env: Vec<String>,
 }
+
+/// The question asked before installing an entry the site has not reviewed.
+pub(crate) const UNREVIEWED_QUESTION: &str = "This entry is NOT reviewed by the site and will run or connect exactly as shown above. Install it anyway?";
+const REVIEWED_QUESTION: &str = "Install it?";
 
 fn local(code: &str, detail: impl Into<String>) -> CatalogError {
     CatalogError::local(code, detail)
@@ -67,30 +70,54 @@ pub(crate) fn skills_root(codex_home: &Path) -> PathBuf {
     codex_home.join(unpack::SKILLS_DIR)
 }
 
-/// The lines shown before asking to install.
+/// One argument as a shell would need it typed: plain words as they are, anything else in single
+/// quotes, so the command shown is exactly the command run.
+fn shell_word(word: &str) -> String {
+    let plain = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "@%+=:,./_-".contains(c));
+    if plain {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
+}
+
+/// The full command line of a local server.
+pub(crate) fn command_line(mcp: &McpSpec) -> String {
+    std::iter::once(mcp.command.as_deref().unwrap_or_default())
+        .chain(mcp.args.iter().map(String::as_str))
+        .map(shell_word)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The lines shown before asking to install: what it is, where it comes from, exactly what runs
+/// or is connected to, and the names (never the values) of everything asked for.
 pub(crate) fn summary_lines(spec: &InstallSpec, local_name: &str) -> Vec<String> {
-    let trust = if spec.reviewed() {
+    let reviewed = spec.reviewed();
+    let trust = if reviewed {
         "reviewed by the site"
     } else {
-        "NOT reviewed by the site"
+        "NOT reviewed by the site (third-party listing)"
     };
     let mut lines = vec![
         format!("{} {} ({})", spec.name, spec.version, spec.reference),
         format!("  trust:   {trust}"),
     ];
-    if let Some(source) = &spec.source_url {
-        lines.push(format!("  page:    {source}"));
+    match (&spec.source_url, reviewed) {
+        (Some(source), true) => lines.push(format!("  page:    {source}")),
+        (Some(source), false) => lines.push(format!("  source:  {source}")),
+        (None, false) => lines.push("  source:  (none given)".to_string()),
+        (None, true) => {}
     }
     match (&spec.mcp, &spec.bundle) {
         (Some(mcp), _) => {
             lines.push(format!("  installs as MCP server `{local_name}`"));
             match mcp.transport {
                 Transport::Stdio => {
-                    let command = std::iter::once(mcp.command.clone().unwrap_or_default())
-                        .chain(mcp.args.iter().cloned())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    lines.push(format!("  runs:    {command}"));
+                    lines.push(format!("  runs:    {}", command_line(mcp)));
                     if !mcp.env.is_empty() {
                         let names: Vec<&str> = mcp.env.keys().map(String::as_str).collect();
                         lines.push(format!("  env:     {}", names.join(", ")));
@@ -101,12 +128,25 @@ pub(crate) fn summary_lines(spec: &InstallSpec, local_name: &str) -> Vec<String>
                         "  address: {}",
                         mcp.url.clone().unwrap_or_default()
                     ));
+                    let headers: Vec<String> = mcp
+                        .headers
+                        .keys()
+                        .cloned()
+                        .chain(
+                            mcp.secret_headers
+                                .iter()
+                                .map(|(header, variable)| format!("{header} (from ${variable})")),
+                        )
+                        .collect();
+                    if !headers.is_empty() {
+                        lines.push(format!("  headers: {}", headers.join(", ")));
+                    }
                 }
             }
             let secrets = secret_names(mcp);
             if !secrets.is_empty() {
                 lines.push(format!(
-                    "  secrets: {} (kept on this computer only)",
+                    "  asks for: {} (kept on this computer only)",
                     secrets.join(", ")
                 ));
             }
@@ -154,7 +194,12 @@ fn collect_secrets(
             format!("`{name}` is not a valid environment variable name"),
         ));
     }
-    let wanted: Vec<&String> = mcp.secret_env.iter().chain(mcp.env.keys()).collect();
+    let wanted: Vec<&String> = mcp
+        .secret_env
+        .iter()
+        .chain(mcp.env.keys())
+        .chain(mcp.secret_headers.values())
+        .collect();
     if let Some(name) = given.keys().find(|name| !wanted.contains(name)) {
         return Err(local(
             "invalid_env",
@@ -190,6 +235,52 @@ fn collect_secrets(
         if mcp.env.contains_key(name) {
             values.insert(name.clone(), value.clone());
         }
+    }
+    Ok(values)
+}
+
+/// Values for the variables a remote server's secret headers read (`secret_headers`): `--env`
+/// first; a variable already set in the environment (`set`, e.g. from `$CODEX_HOME/.env` of an
+/// earlier install) is left as it is; otherwise the terminal is asked for the whole header value
+/// (e.g. `Bearer …`). Anything still missing fails with the list of names.
+pub(crate) fn collect_header_values(
+    mcp: &McpSpec,
+    given: &BTreeMap<String, String>,
+    prompter: &mut dyn Prompter,
+    set: &dyn Fn(&str) -> bool,
+) -> Result<BTreeMap<String, String>, CatalogError> {
+    let mut values = BTreeMap::new();
+    let mut missing = Vec::new();
+    for (header, name) in &mcp.secret_headers {
+        let value = match given.get(name) {
+            Some(value) => Some(value.clone()),
+            None if set(name) => continue,
+            None if prompter.interactive() => {
+                prompter.secret(&format!("{name} ({header} header)"))?
+            }
+            None => None,
+        };
+        match value.filter(|value| !value.is_empty()) {
+            Some(value) if env_file::quoted(&value).is_err() => {
+                return Err(local(
+                    "invalid_env",
+                    format!("the value for {name} cannot be a header value (line break)"),
+                ));
+            }
+            Some(value) => {
+                values.insert(name.clone(), value);
+            }
+            None => missing.push(name.clone()),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(local(
+            "missing_secrets",
+            format!(
+                "values are needed for {}; pass --env NAME=VALUE for each",
+                missing.join(", ")
+            ),
+        ));
     }
     Ok(values)
 }
@@ -232,6 +323,9 @@ pub(crate) fn mcp_server_config(
                 ));
             }
             let mut raw = serde_json::json!({ "url": url, "enabled": enabled });
+            if !mcp.headers.is_empty() {
+                raw["http_headers"] = serde_json::json!(mcp.headers);
+            }
             if !mcp.secret_headers.is_empty() {
                 raw["env_http_headers"] = serde_json::json!(mcp.secret_headers);
             }
@@ -334,7 +428,29 @@ async fn local_name_for(
             }
             Ok(name)
         }
+        Kind::Cli => Err(not_installable(spec)),
     }
+}
+
+/// A command-line tool: never installed here, only its official instructions are pointed to.
+fn not_installable(spec: &InstallSpec) -> CatalogError {
+    let url = spec
+        .install_instructions
+        .as_ref()
+        .and_then(|instructions| instructions.url.clone());
+    let detail = match &url {
+        Some(url) => format!(
+            "{} is a command-line tool; My Agent does not install those. Official instructions: {url}",
+            spec.name
+        ),
+        None => format!(
+            "{} is a command-line tool; My Agent does not install those, and the site has no instructions link for it.",
+            spec.name
+        ),
+    };
+    let mut err = local("not_installable", detail);
+    err.instructions_url = url;
+    err
 }
 
 fn now_rfc3339() -> String {
@@ -348,11 +464,15 @@ async fn apply_locally(
     answer: &super::client::InstallAnswer,
     local_name: &str,
     secrets: &BTreeMap<String, String>,
+    header_values: &BTreeMap<String, String>,
 ) -> Result<Option<String>, CatalogError> {
     let spec = &answer.spec;
     match (&spec.mcp, &spec.bundle) {
         (Some(mcp), _) => {
             let entry = mcp_server_config(mcp, secrets, true)?;
+            // Before config.toml: a server entry is never left pointing at values not written.
+            env_file::set(codex_home, header_values)
+                .map_err(|err| io_failure("could not write $CODEX_HOME/.env", err))?;
             let mut servers = load_servers(codex_home).await?;
             servers.insert(local_name.to_string(), entry);
             save_servers(codex_home, &servers).await?;
@@ -399,6 +519,9 @@ async fn apply_locally(
 
 /// resolve → summary → confirm → secrets → `install/` → local files → ledger. When the local step
 /// fails after the site recorded the install, the site record is withdrawn again (best effort).
+///
+/// A command-line tool (`kind: cli`) stops after resolve with `not_installable` and its
+/// instructions link; `install/` is never called for it.
 pub(crate) async fn install(
     codex_home: &Path,
     client: &CatalogClient,
@@ -411,28 +534,35 @@ pub(crate) async fn install(
     let spec = client.resolve(&reference.to_string()).await?;
     spec.validate()
         .map_err(|detail| local("unexpected_response", detail))?;
+    if !spec.answers(&reference) {
+        return Err(local(
+            "unexpected_response",
+            format!(
+                "asked for {reference} but the site described {}",
+                spec.reference
+            ),
+        ));
+    }
+    if spec.kind == Kind::Cli {
+        return Err(not_installable(&spec));
+    }
     let ledger = load_ledger(codex_home)?;
     let local_name = local_name_for(codex_home, &ledger, &spec, options.alias.as_deref()).await?;
     for line in summary_lines(&spec, &local_name) {
         show(&line);
     }
-    if !options.yes {
-        if !prompter.interactive() {
-            return Err(local(
-                "confirmation_required",
-                "no terminal to confirm on; pass --yes to install without asking",
-            ));
-        }
-        if !prompter.confirm("Install it?")? {
-            return Err(local("cancelled", "nothing was installed"));
-        }
-    }
-    let secrets = match &spec.mcp {
-        Some(mcp) => collect_secrets(mcp, &options.env, prompter)?,
+    confirm(&spec, options, prompter)?;
+    let (secrets, header_values) = match &spec.mcp {
+        Some(mcp) => (
+            collect_secrets(mcp, &options.env, prompter)?,
+            collect_header_values(mcp, &options.env, prompter, &|name| {
+                std::env::var_os(name).is_some()
+            })?,
+        ),
         None if !options.env.is_empty() => {
             return Err(local("invalid_env", "--env applies to MCP servers only"));
         }
-        None => BTreeMap::new(),
+        None => (BTreeMap::new(), BTreeMap::new()),
     };
 
     let answer = client.install(&spec.reference).await?;
@@ -440,7 +570,10 @@ pub(crate) async fn install(
         .spec
         .validate()
         .map_err(|detail| local("unexpected_response", detail))?;
-    if answer.spec.reference != spec.reference || answer.spec.mcp != spec.mcp {
+    if answer.spec.reference != spec.reference
+        || answer.spec.mcp != spec.mcp
+        || answer.spec.trust != spec.trust
+    {
         // What was confirmed is what gets installed; anything else is withdrawn.
         let _ = client.uninstall(&spec.reference).await;
         return Err(local(
@@ -448,7 +581,16 @@ pub(crate) async fn install(
             "the item changed on the site while installing; run install again",
         ));
     }
-    let skill_name = match apply_locally(codex_home, client, &answer, &local_name, &secrets).await {
+    let skill_name = match apply_locally(
+        codex_home,
+        client,
+        &answer,
+        &local_name,
+        &secrets,
+        &header_values,
+    )
+    .await
+    {
         Ok(skill_name) => skill_name,
         Err(err) => {
             let _ = client.uninstall(&spec.reference).await;
@@ -481,26 +623,41 @@ pub(crate) async fn install(
         skill_name,
         installed_at: now_rfc3339(),
         enabled: true,
+        trust: installed.trust.clone(),
+        env_file: header_values.keys().cloned().collect(),
     };
     let mut ledger = load_ledger(codex_home)?;
     ledger.upsert(entry.clone());
     save_ledger(codex_home, &ledger)?;
-    let unset_header_env = installed
-        .mcp
-        .as_ref()
-        .filter(|mcp| mcp.transport == Transport::Http)
-        .map(|mcp| {
-            mcp.secret_headers
-                .values()
-                .filter(|name| std::env::var_os(name).is_none())
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(InstallOutcome {
-        entry,
-        unset_header_env,
-    })
+    Ok(InstallOutcome { entry })
+}
+
+/// Asks before installing (`--yes` skips the question); an entry the site has not reviewed gets a
+/// question saying so. Without a terminal and without `--yes` nothing is installed.
+fn confirm(
+    spec: &InstallSpec,
+    options: &InstallOptions,
+    prompter: &mut dyn Prompter,
+) -> Result<(), CatalogError> {
+    if options.yes {
+        return Ok(());
+    }
+    if !prompter.interactive() {
+        return Err(local(
+            "confirmation_required",
+            "no terminal to confirm on; pass --yes to install without asking",
+        ));
+    }
+    let question = if spec.reviewed() {
+        REVIEWED_QUESTION
+    } else {
+        UNREVIEWED_QUESTION
+    };
+    if prompter.confirm(question)? {
+        Ok(())
+    } else {
+        Err(local("cancelled", "nothing was installed"))
+    }
 }
 
 fn find_entry(ledger: &Ledger, selector: &str) -> Result<LedgerEntry, CatalogError> {
@@ -520,6 +677,17 @@ fn find_entry(ledger: &Ledger, selector: &str) -> Result<LedgerEntry, CatalogErr
             Err(err)
         }
     }
+}
+
+/// Command-line tools are never installed, so a ledger row for one was not written by this CLI.
+fn cli_in_ledger(entry: &LedgerEntry) -> CatalogError {
+    local(
+        "not_installable",
+        format!(
+            "`{}` is a command-line tool; there is nothing to turn on or off",
+            entry.name
+        ),
+    )
 }
 
 /// The result of a local change that the site is told about afterwards.
@@ -561,6 +729,7 @@ pub(crate) async fn set_enabled(
                 .unwrap_or_else(|| entry.slug.clone());
             set_skill_enabled(codex_home, &skill_name, enabled).await?;
         }
+        Kind::Cli => return Err(cli_in_ledger(&entry)),
     }
     ledger.set_enabled(&entry.reference, enabled);
     save_ledger(codex_home, &ledger)?;
@@ -597,7 +766,10 @@ pub(crate) async fn remove(
             // `enabled = true` drops any `[[skills.config]]` override for the name.
             set_skill_enabled(codex_home, &skill_name, true).await?;
         }
+        Kind::Cli => {}
     }
+    env_file::unset(codex_home, &entry.env_file)
+        .map_err(|err| io_failure("could not update $CODEX_HOME/.env", err))?;
     ledger.remove(&entry.reference);
     save_ledger(codex_home, &ledger)?;
     let site_warning = match client.uninstall(&entry.reference).await {
@@ -626,6 +798,8 @@ pub(crate) struct ListedItem {
     pub(crate) update_available: bool,
     /// Recorded on the site for this account.
     pub(crate) on_site: bool,
+    /// Not reviewed by the site: reinstalling (an update included) asks again.
+    pub(crate) reconfirm_on_update: bool,
 }
 
 /// The ledger, merged with the site's `installed/` when it could be read (`site = None` when
@@ -652,6 +826,7 @@ pub(crate) fn merge_listing(ledger: &Ledger, site: Option<&[SiteInstalled]>) -> 
                 latest_version: remote.and_then(|row| row.latest_version.clone()),
                 update_available: remote.is_some_and(|row| row.update_available),
                 on_site: remote.is_some(),
+                reconfirm_on_update: entry.reconfirm_on_update(),
             }
         })
         .collect();
@@ -668,6 +843,7 @@ pub(crate) fn merge_listing(ledger: &Ledger, site: Option<&[SiteInstalled]>) -> 
                 latest_version: row.latest_version.clone(),
                 update_available: row.update_available,
                 on_site: true,
+                reconfirm_on_update: !row.reference.starts_with("store:"),
             });
         }
     }

@@ -652,3 +652,419 @@ async fn an_expired_download_link_says_to_install_again() {
         err.message()
     );
 }
+
+// --- P2: the open-source tool directory (`tools:` references, unreviewed) -----------------------
+
+const TOOLS_NPM_REF: &str = "tools:mcp/io.github.acme/weather";
+const TOOLS_HTTP_REF: &str = "tools:mcp/io.github.acme/remote";
+
+fn tools_npm_spec() -> serde_json::Value {
+    serde_json::json!({
+        "ref": TOOLS_NPM_REF, "kind": "mcp", "slug": "weather", "name": "Weather",
+        "version": "1.2.0", "trust": "unreviewed", "source_url": "https://github.com/acme/weather",
+        "mcp": {"transport": "stdio", "command": "npx",
+                "args": ["-y", "@acme/weather@1.2.0", "--port", "3000"],
+                "env": {"REGION": "eu"}, "secret_env": ["API_KEY", "WORKSPACE"], "url": null,
+                "headers": {}, "secret_headers": {}},
+        "skill": null, "bundle": null, "install_instructions": null
+    })
+}
+
+fn tools_http_spec() -> serde_json::Value {
+    serde_json::json!({
+        "ref": TOOLS_HTTP_REF, "kind": "mcp", "slug": "remote", "name": "Remote",
+        "version": "2.0.0", "trust": "unreviewed", "source_url": "https://github.com/acme/remote",
+        "mcp": {"transport": "http", "command": null, "args": [], "env": {}, "secret_env": [],
+                "url": "https://mcp.acme.dev/mcp", "headers": {"X-Client": "onigio"},
+                "secret_headers": {"X-API-Key": "REMOTE_X_API_KEY"}},
+        "skill": null, "bundle": null, "install_instructions": null
+    })
+}
+
+fn no_installs_expected() -> Mock {
+    Mock::given(method("POST"))
+        .and(path("/api/agent-catalog/install/"))
+        .respond_with(ResponseTemplate::new(201))
+        .expect(0)
+}
+
+#[tokio::test]
+async fn a_tool_directory_npm_server_installs_under_its_slug_and_keeps_the_ref() {
+    let (server, home) = site().await;
+    mount_resolve(&server, TOOLS_NPM_REF, &tools_npm_spec()).await;
+    mount_install(
+        &server,
+        TOOLS_NPM_REF,
+        serde_json::json!({"spec": tools_npm_spec(), "installed_version": "1.2.0",
+                           "download_url": null}),
+    )
+    .await;
+    // `secret_env` also names required settings that are not secret (WORKSPACE): each is asked.
+    let mut prompter = ScriptedPrompter {
+        interactive: true,
+        confirms: [true].into(),
+        secrets: [
+            ("API_KEY".to_string(), "k-123".to_string()),
+            ("WORKSPACE".to_string(), "/srv/w".to_string()),
+        ]
+        .into(),
+        ..Default::default()
+    };
+    let client = signed_in_client(home.path()).unwrap();
+    let mut shown = Vec::new();
+    let outcome = install::install(
+        home.path(),
+        &client,
+        &mut prompter,
+        TOOLS_NPM_REF,
+        &InstallOptions::default(),
+        &mut |line: &str| shown.push(line.to_string()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        prompter.asked,
+        vec![install::UNREVIEWED_QUESTION, "API_KEY", "WORKSPACE"]
+    );
+    let shown = shown.join("\n");
+    assert!(
+        shown.contains("source:  https://github.com/acme/weather"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("runs:    npx -y @acme/weather@1.2.0 --port 3000"),
+        "{shown}"
+    );
+
+    let toml = config_toml(home.path());
+    let entry = &toml["mcp_servers"]["weather"];
+    assert_eq!(entry["command"].as_str(), Some("npx"));
+    assert_eq!(entry["args"][1].as_str(), Some("@acme/weather@1.2.0"));
+    assert_eq!(entry["env"]["API_KEY"].as_str(), Some("k-123"));
+    assert_eq!(entry["env"]["WORKSPACE"].as_str(), Some("/srv/w"));
+    assert_eq!(entry["env"]["REGION"].as_str(), Some("eu"));
+    assert!(
+        toml["mcp_servers"].get("io.github.acme/weather").is_none(),
+        "the key is never a table name"
+    );
+
+    let ledger = Ledger::load(home.path()).unwrap();
+    assert_eq!(ledger.items[0].reference, TOOLS_NPM_REF);
+    assert_eq!(ledger.items[0].name, "weather");
+    assert_eq!(ledger.items[0].trust, "unreviewed");
+    assert!(ledger.items[0].reconfirm_on_update());
+    assert_eq!(outcome.entry, ledger.items[0]);
+
+    // equip/unequip/remove address the site with the ref exactly as recorded.
+    Mock::given(method("POST"))
+        .and(path("/api/agent-catalog/uninstall/"))
+        .and(body_json(serde_json::json!({"ref": TOOLS_NPM_REF})))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    install::remove(home.path(), &client, "weather")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_remote_server_writes_headers_and_keeps_the_secret_header_value_in_the_env_file() {
+    let (server, home) = site().await;
+    mount_resolve(&server, TOOLS_HTTP_REF, &tools_http_spec()).await;
+    mount_install(
+        &server,
+        TOOLS_HTTP_REF,
+        serde_json::json!({"spec": tools_http_spec(), "installed_version": "2.0.0"}),
+    )
+    .await;
+    let mut prompter = ScriptedPrompter {
+        interactive: true,
+        confirms: [true].into(),
+        secrets: [(
+            "REMOTE_X_API_KEY (X-API-Key header)".to_string(),
+            "Bearer s3cret".to_string(),
+        )]
+        .into(),
+        ..Default::default()
+    };
+    let outcome = run_install(
+        home.path(),
+        TOOLS_HTTP_REF,
+        &mut prompter,
+        InstallOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome.entry.env_file, vec!["REMOTE_X_API_KEY"]);
+
+    let toml = config_toml(home.path());
+    let entry = &toml["mcp_servers"]["remote"];
+    assert_eq!(entry["url"].as_str(), Some("https://mcp.acme.dev/mcp"));
+    assert_eq!(entry["http_headers"]["X-Client"].as_str(), Some("onigio"));
+    assert_eq!(
+        entry["env_http_headers"]["X-API-Key"].as_str(),
+        Some("REMOTE_X_API_KEY")
+    );
+    let config_text = std::fs::read_to_string(home.path().join("config.toml")).unwrap();
+    assert!(!config_text.contains("s3cret"), "{config_text}");
+    // The agent loads $CODEX_HOME/.env at start-up; the value reads back unchanged.
+    let loaded: Vec<(String, String)> = dotenvy::from_path_iter(home.path().join(".env"))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        loaded,
+        vec![("REMOTE_X_API_KEY".to_string(), "Bearer s3cret".to_string())]
+    );
+    for request in server.received_requests().await.unwrap() {
+        assert!(!String::from_utf8_lossy(&request.body).contains("s3cret"));
+    }
+
+    // Removing it takes the value out of .env again.
+    Mock::given(method("POST"))
+        .and(path("/api/agent-catalog/uninstall/"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    let client = signed_in_client(home.path()).unwrap();
+    install::remove(home.path(), &client, TOOLS_HTTP_REF)
+        .await
+        .unwrap();
+    let left = std::fs::read_to_string(home.path().join(".env")).unwrap();
+    assert!(!left.contains("REMOTE_X_API_KEY"), "{left}");
+}
+
+#[tokio::test]
+async fn a_command_line_tool_only_points_to_its_instructions() {
+    let (server, home) = site().await;
+    let reference = "tools:cli/burntsushi/ripgrep";
+    let spec = serde_json::json!({
+        "ref": reference, "kind": "cli", "slug": "ripgrep", "name": "ripgrep",
+        "version": "14.1.0", "trust": "unreviewed",
+        "source_url": "https://github.com/burntsushi/ripgrep",
+        "mcp": null, "skill": null, "bundle": null,
+        "install_instructions": {"url": "https://github.com/burntsushi/ripgrep#readme"}
+    });
+    mount_resolve(&server, reference, &spec).await;
+    no_installs_expected().mount(&server).await;
+    let err = run_install(
+        home.path(),
+        reference,
+        &mut ScriptedPrompter::default(),
+        InstallOptions {
+            yes: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code, "not_installable");
+    assert_eq!(
+        err.instructions_url.as_deref(),
+        Some("https://github.com/burntsushi/ripgrep#readme")
+    );
+    assert!(
+        err.message()
+            .contains("Official instructions: https://github.com/burntsushi/ripgrep#readme"),
+        "{}",
+        err.message()
+    );
+    assert_eq!(
+        error_json(&err)["install_instructions"]["url"],
+        "https://github.com/burntsushi/ripgrep#readme"
+    );
+    assert!(!home.path().join("config.toml").exists());
+    assert!(Ledger::load(home.path()).unwrap().items.is_empty());
+}
+
+#[tokio::test]
+async fn an_unreviewed_entry_without_a_terminal_needs_yes() {
+    let (server, home) = site().await;
+    mount_resolve(&server, TOOLS_NPM_REF, &tools_npm_spec()).await;
+    no_installs_expected().mount(&server).await;
+    let options = InstallOptions {
+        env: [
+            ("API_KEY".to_string(), "k".to_string()),
+            ("WORKSPACE".to_string(), "w".to_string()),
+        ]
+        .into(),
+        ..Default::default()
+    };
+    let err = run_install(
+        home.path(),
+        TOOLS_NPM_REF,
+        &mut ScriptedPrompter::default(),
+        options.clone(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code, "confirmation_required");
+
+    // On a terminal, declining the unreviewed warning installs nothing either.
+    let mut prompter = ScriptedPrompter {
+        interactive: true,
+        confirms: [false].into(),
+        ..Default::default()
+    };
+    let err = run_install(home.path(), TOOLS_NPM_REF, &mut prompter, options)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "cancelled");
+    assert_eq!(prompter.asked, vec![install::UNREVIEWED_QUESTION]);
+    assert!(!home.path().join("config.toml").exists());
+}
+
+#[tokio::test]
+async fn a_spec_for_another_entry_than_the_one_asked_for_is_refused() {
+    let (server, home) = site().await;
+    let mut other = tools_npm_spec();
+    other["ref"] = "tools:mcp/io.github.evil/weather".into();
+    mount_resolve(&server, TOOLS_NPM_REF, &other).await;
+    no_installs_expected().mount(&server).await;
+    let err = run_install(
+        home.path(),
+        TOOLS_NPM_REF,
+        &mut ScriptedPrompter::default(),
+        InstallOptions {
+            yes: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code, "unexpected_response");
+}
+
+#[tokio::test]
+async fn tool_directory_refusals_show_the_sites_detail_and_what_to_do() {
+    let (server, home) = site().await;
+    let reference = "tools:skill/acme/skills";
+    let detail = "This entry cannot be installed from the tool directory until it is reviewed.";
+    Mock::given(method("GET"))
+        .and(path("/api/agent-catalog/resolve/"))
+        .and(query_param("ref", reference))
+        .respond_with(
+            ResponseTemplate::new(422)
+                .set_body_json(serde_json::json!({"code": "needs_review", "detail": detail})),
+        )
+        .mount(&server)
+        .await;
+    no_installs_expected().mount(&server).await;
+    let err = run_install(
+        home.path(),
+        reference,
+        &mut ScriptedPrompter::default(),
+        InstallOptions {
+            yes: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code, "needs_review");
+    assert_eq!(err.status, Some(422));
+    let message = err.message();
+    assert!(message.starts_with(detail), "{message}");
+    assert!(
+        message.contains("reviewed before it can be installed"),
+        "{message}"
+    );
+    assert_eq!(error_json(&err)["code"], "needs_review");
+
+    // Every tool directory refusal code has its own next step.
+    for code in [
+        "unsupported_registry",
+        "unpinned_version",
+        "needs_input",
+        "needs_review",
+        "no_install_target",
+        "pending_sync",
+        "not_installable",
+        "unsupported_transport",
+    ] {
+        let err = CatalogError::from_response(
+            422,
+            &serde_json::json!({"code": code, "detail": "Site says why."}),
+        );
+        let message = err.message();
+        assert!(
+            message.starts_with("Site says why.") && message.len() > "Site says why.".len() + 1,
+            "{code}: {message}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn search_takes_a_source_and_shows_unreviewed_rows() {
+    let (server, home) = site().await;
+    Mock::given(method("GET"))
+        .and(path("/api/agent-catalog/search/"))
+        .and(query_param("q", "weather"))
+        .and(query_param("source", "tools"))
+        .and(query_param("kind", "cli"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": [
+                {"ref": TOOLS_NPM_REF, "kind": "mcp", "slug": "weather", "name": "Weather",
+                 "summary": "Forecasts", "trust": "unreviewed", "installs": null,
+                 "supported": true},
+                {"ref": "tools:cli/acme/wx", "kind": "cli", "slug": "wx", "name": "wx",
+                 "summary": "", "trust": "unreviewed", "installs": null, "supported": false,
+                 "unsupported_reason": "not_installable"}
+            ],
+            "pagination": {"page": 1, "page_size": 20, "total": 2}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/agent-catalog/search/"))
+        .and(query_param("source", "store"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": [{"ref": "store:mcp/context7", "kind": "mcp", "slug": "context7",
+                      "name": "Context7", "summary": "", "trust": "reviewed", "installs": 12,
+                      "supported": true}],
+            "pagination": {"page": 1}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = signed_in_client(home.path()).unwrap();
+    let page = client
+        .search("weather", Some("cli"), "tools", None)
+        .await
+        .unwrap();
+    let lines = search_lines(&page.data);
+    assert_eq!(
+        lines,
+        vec![
+            format!("{TOOLS_NPM_REF}  Weather  (unreviewed)"),
+            "    Forecasts".to_string(),
+            "tools:cli/acme/wx  wx  (unreviewed)  [command-line tool: instructions only]"
+                .to_string(),
+        ]
+    );
+    let store = client.search("ctx", None, "store", None).await.unwrap();
+    assert_eq!(
+        search_lines(&store.data),
+        vec!["store:mcp/context7  Context7  (12 installs)"]
+    );
+
+    // On the command line `--source` defaults to the store.
+    use clap::Parser;
+    #[derive(clap::Parser, Debug)]
+    struct Root {
+        #[command(subcommand)]
+        command: CatalogCommand,
+    }
+    let parse = |args: &[&str]| match Root::try_parse_from(args).unwrap().command {
+        CatalogCommand::Search(args) => args.source,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(parse(&["x", "search", "a"]), SourceArg::Store);
+    assert_eq!(
+        parse(&["x", "search", "a", "--source", "all"]),
+        SourceArg::All
+    );
+    assert!(Root::try_parse_from(["x", "search", "a", "--source", "web"]).is_err());
+}

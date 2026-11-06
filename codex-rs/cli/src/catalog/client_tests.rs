@@ -67,7 +67,7 @@ async fn reads_are_retried_on_gateway_errors_then_succeed() {
         .await;
     let client = CatalogClient::new(&server.uri(), "oad_test").unwrap();
     let page = client
-        .search("pdf tools", Some("skill"), None)
+        .search("pdf tools", Some("skill"), "store", None)
         .await
         .unwrap();
     assert_eq!(page.data.len(), 1);

@@ -99,8 +99,13 @@ fn unknown_or_misplaced_env_flags_are_refused() {
     let mut quiet = ScriptedPrompter::default();
     let err = collect_secrets(&stdio_mcp(), &given(&[("OTHER", "x")]), &mut quiet).unwrap_err();
     assert_eq!(err.code, "invalid_env");
-    let err = collect_secrets(&http_mcp(), &given(&[("REMOTE_KEY", "x")]), &mut quiet).unwrap_err();
+    let err = collect_secrets(&http_mcp(), &given(&[("OTHER", "x")]), &mut quiet).unwrap_err();
     assert_eq!(err.code, "invalid_env");
+    // The variable a secret header is read from may be given with --env.
+    assert_eq!(
+        collect_secrets(&http_mcp(), &given(&[("REMOTE_KEY", "x")]), &mut quiet).unwrap(),
+        BTreeMap::new()
+    );
     // Overriding one of the server's own variables is allowed.
     let values = collect_secrets(
         &stdio_mcp(),
@@ -185,6 +190,8 @@ fn listing_merges_this_computer_with_the_site() {
         skill_name: None,
         installed_at: "2026-11-06T00:00:00Z".to_string(),
         enabled: false,
+        trust: "reviewed".to_string(),
+        env_file: Vec::new(),
     });
     let site: Vec<SiteInstalled> = serde_json::from_value(serde_json::json!([
         {"ref": "store:mcp/ctx", "kind": "mcp", "slug": "ctx", "name": "Ctx",
@@ -242,4 +249,125 @@ fn placeholders_in_args_and_urls_are_filled_locally() {
     let err =
         mcp_server_config(&host, &given(&[("HOST", "http://evil.example")]), true).unwrap_err();
     assert_eq!(err.code, "invalid_env");
+}
+
+fn not_set(_: &str) -> bool {
+    false
+}
+
+#[test]
+fn header_values_come_from_env_flags_the_environment_or_the_terminal() {
+    let mut quiet = ScriptedPrompter::default();
+    let values = collect_header_values(
+        &http_mcp(),
+        &given(&[("REMOTE_KEY", "k")]),
+        &mut quiet,
+        &not_set,
+    )
+    .unwrap();
+    assert_eq!(values, given(&[("REMOTE_KEY", "k")]));
+
+    // Already in the environment (an earlier install's .env): not asked, not rewritten.
+    let values =
+        collect_header_values(&http_mcp(), &BTreeMap::new(), &mut quiet, &|_| true).unwrap();
+    assert!(values.is_empty() && quiet.asked.is_empty());
+
+    let mut terminal = ScriptedPrompter {
+        interactive: true,
+        secrets: [(
+            "REMOTE_KEY (X-Api-Key header)".to_string(),
+            "Bearer t".to_string(),
+        )]
+        .into(),
+        ..Default::default()
+    };
+    let values =
+        collect_header_values(&http_mcp(), &BTreeMap::new(), &mut terminal, &not_set).unwrap();
+    assert_eq!(values, given(&[("REMOTE_KEY", "Bearer t")]));
+
+    let err =
+        collect_header_values(&http_mcp(), &BTreeMap::new(), &mut quiet, &not_set).unwrap_err();
+    assert_eq!(err.code, "missing_secrets");
+    assert!(err.detail.contains("REMOTE_KEY"), "{}", err.detail);
+    let err = collect_header_values(
+        &http_mcp(),
+        &given(&[("REMOTE_KEY", "a\r\nX-Evil: 1")]),
+        &mut quiet,
+        &not_set,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "invalid_env");
+}
+
+#[test]
+fn literal_headers_become_http_headers() {
+    let mcp: McpSpec = serde_json::from_value(serde_json::json!({
+        "transport": "http", "url": "https://mcp.example.com/mcp",
+        "headers": {"X-Client": "onigio"}, "secret_headers": {"Authorization": "W_AUTHORIZATION"},
+    }))
+    .unwrap();
+    match mcp_server_config(&mcp, &BTreeMap::new(), true)
+        .unwrap()
+        .transport
+    {
+        McpServerTransportConfig::StreamableHttp {
+            http_headers,
+            env_http_headers,
+            ..
+        } => {
+            assert_eq!(
+                http_headers.unwrap().get("X-Client").map(String::as_str),
+                Some("onigio")
+            );
+            assert_eq!(
+                env_http_headers
+                    .unwrap()
+                    .get("Authorization")
+                    .map(String::as_str),
+                Some("W_AUTHORIZATION")
+            );
+        }
+        other => panic!("expected http, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_unreviewed_summary_shows_its_source_full_command_and_header_names() {
+    let stdio: InstallSpec = serde_json::from_value(serde_json::json!({
+        "ref": "tools:mcp/io.github.acme/weather", "kind": "mcp", "slug": "weather",
+        "name": "Weather", "version": "1.2.0", "trust": "unreviewed",
+        "source_url": "https://github.com/acme/weather",
+        "mcp": {"transport": "stdio", "command": "npx",
+                "args": ["-y", "@acme/weather@1.2.0", "--motd", "hi there; rm -rf ~"],
+                "env": {}, "secret_env": ["API_KEY", "REGION"]},
+    }))
+    .unwrap();
+    let text = summary_lines(&stdio, "weather").join("\n");
+    assert!(
+        text.contains("source:  https://github.com/acme/weather"),
+        "{text}"
+    );
+    assert!(
+        text.contains("runs:    npx -y @acme/weather@1.2.0 --motd 'hi there; rm -rf ~'"),
+        "{text}"
+    );
+    assert!(text.contains("API_KEY, REGION"), "{text}");
+
+    let http: InstallSpec = serde_json::from_value(serde_json::json!({
+        "ref": "tools:mcp/io.github.acme/remote", "kind": "mcp", "slug": "remote",
+        "name": "Remote", "version": "2", "trust": "unreviewed", "source_url": null,
+        "mcp": {"transport": "http", "url": "https://mcp.acme.dev/mcp",
+                "headers": {"X-Client": "secret-looking-literal"},
+                "secret_headers": {"X-API-Key": "REMOTE_X_API_KEY"}},
+    }))
+    .unwrap();
+    let text = summary_lines(&http, "remote").join("\n");
+    assert!(text.contains("source:  (none given)"), "{text}");
+    assert!(text.contains("address: https://mcp.acme.dev/mcp"), "{text}");
+    assert!(
+        text.contains("headers: X-Client, X-API-Key (from $REMOTE_X_API_KEY)"),
+        "{text}"
+    );
+    assert!(text.contains("asks for: REMOTE_X_API_KEY"), "{text}");
+    assert!(!text.contains("secret-looking-literal"), "{text}");
 }

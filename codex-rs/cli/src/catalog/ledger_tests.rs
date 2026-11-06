@@ -13,6 +13,8 @@ pub(crate) fn entry(reference: &str, kind: Kind, slug: &str, name: &str) -> Ledg
         skill_name: None,
         installed_at: "2026-11-06T00:00:00Z".to_string(),
         enabled: true,
+        trust: "reviewed".to_string(),
+        env_file: Vec::new(),
     }
 }
 

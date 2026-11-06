@@ -1,6 +1,7 @@
 //! `search`, `install`, `list`, `equip`, `unequip` and `remove`: MCP servers and skills from the
-//! site's catalog (`/store`), installed on this computer with the site account `login` saved
-//! (docs/agent-codex/PLUGINS.md §9 in the site repo).
+//! site's catalog (`/store`) and from its open-source tool directory (`/apps/tools`, unreviewed
+//! `tools:` references), installed on this computer with the site account `login` saved
+//! (docs/agent-codex/PLUGINS.md §9 and §10 in the site repo).
 //!
 //! Layout: [`spec`] (references and the install description), [`client`] (the site's
 //! `/api/agent-catalog/`), [`install`] (the flows and config writes), [`ledger`]
@@ -8,6 +9,7 @@
 //! the terminal.
 
 mod client;
+mod env_file;
 mod install;
 mod ledger;
 mod spec;
@@ -52,6 +54,37 @@ pub(crate) enum CatalogCommand {
 pub(crate) enum KindArg {
     Mcp,
     Skill,
+    /// Command-line tools (tool directory only; shown with their instructions, never installed).
+    Cli,
+}
+
+impl KindArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Mcp => "mcp",
+            Self::Skill => "skill",
+            Self::Cli => "cli",
+        }
+    }
+}
+
+/// Where to search: the reviewed store, the unreviewed open-source tool directory, or both.
+#[derive(Debug, clap::ValueEnum, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SourceArg {
+    #[default]
+    Store,
+    Tools,
+    All,
+}
+
+impl SourceArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Store => "store",
+            Self::Tools => "tools",
+            Self::All => "all",
+        }
+    }
 }
 
 #[derive(Debug, clap::Args)]
@@ -59,9 +92,12 @@ pub(crate) struct SearchArgs {
     /// Words to search for.
     #[arg(required = true, num_args = 1..)]
     pub(crate) query: Vec<String>,
-    /// Only MCP servers or only skills.
+    /// Only MCP servers, skills or (tool directory) command-line tools.
     #[arg(long, value_enum)]
     pub(crate) kind: Option<KindArg>,
+    /// The site's reviewed store, its unreviewed open-source tool directory, or both.
+    #[arg(long, value_enum, default_value_t = SourceArg::Store)]
+    pub(crate) source: SourceArg,
     /// Result page (from 1).
     #[arg(long)]
     pub(crate) page: Option<u32>,
@@ -72,7 +108,7 @@ pub(crate) struct SearchArgs {
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct InstallArgs {
-    /// store:mcp/<slug>, store:skill/<slug>, or a slug.
+    /// store:mcp/<slug>, store:skill/<slug>, tools:<mcp|skill|cli>/<key>, or a slug.
     #[arg(value_name = "REF")]
     pub(crate) reference: String,
     /// Install without asking for confirmation.
@@ -81,7 +117,8 @@ pub(crate) struct InstallArgs {
     /// Local name for an MCP server (default: its slug).
     #[arg(long, value_name = "NAME")]
     pub(crate) name: Option<String>,
-    /// Value for a secret the server needs, kept on this computer only. Repeatable.
+    /// Value for a setting or secret the server needs (an environment variable, or the variable a
+    /// secret header is read from), kept on this computer only. Repeatable.
     #[arg(long = "env", value_name = "KEY=VALUE", value_parser = parse_env_pair)]
     pub(crate) env: Vec<(String, String)>,
     /// Print one JSON result line.
@@ -197,6 +234,7 @@ fn error_json(err: &CatalogError) -> serde_json::Value {
         "code": err.code,
         "detail": err.message(),
         "candidates": err.candidates,
+        "install_instructions": err.instructions_url.as_ref().map(|url| serde_json::json!({ "url": url })),
     })
 }
 
@@ -219,12 +257,9 @@ fn warn_site(err: &CatalogError, site: &str) {
 }
 
 async fn run_search(client: &CatalogClient, args: &SearchArgs) -> Result<(), CatalogError> {
-    let kind = args.kind.map(|kind| match kind {
-        KindArg::Mcp => "mcp",
-        KindArg::Skill => "skill",
-    });
+    let kind = args.kind.map(KindArg::as_str);
     let page = client
-        .search(&args.query.join(" "), kind, args.page)
+        .search(&args.query.join(" "), kind, args.source.as_str(), args.page)
         .await?;
     if args.json {
         let hits: Vec<serde_json::Value> = page
@@ -232,7 +267,7 @@ async fn run_search(client: &CatalogClient, args: &SearchArgs) -> Result<(), Cat
             .iter()
             .map(|hit| {
                 serde_json::json!({
-                    "ref": hit.reference, "kind": hit.kind, "name": hit.name,
+                    "ref": hit.reference, "kind": hit.kind, "slug": hit.slug, "name": hit.name,
                     "summary": hit.summary, "trust": hit.trust, "installs": hit.installs,
                     "supported": hit.supported, "unsupported_reason": hit.unsupported_reason,
                 })
@@ -248,21 +283,38 @@ async fn run_search(client: &CatalogClient, args: &SearchArgs) -> Result<(), Cat
         eprintln!("Nothing found.");
         return Ok(());
     }
-    for hit in &page.data {
+    for line in search_lines(&page.data) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// One line per hit (trust or install count, and why it cannot be installed), then its summary.
+fn search_lines(hits: &[client::SearchHit]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for hit in hits {
         let note = match (&hit.supported, &hit.unsupported_reason) {
             (true, _) => String::new(),
+            (false, Some(reason)) if reason == "not_installable" => {
+                "  [command-line tool: instructions only]".to_string()
+            }
             (false, Some(reason)) => format!("  [not supported: {reason}]"),
             (false, None) => "  [not supported]".to_string(),
         };
-        println!(
-            "{}  {}  ({} installs){note}",
-            hit.reference, hit.name, hit.installs
-        );
+        let standing = match (hit.trust.as_str(), hit.installs) {
+            (spec::TRUST_REVIEWED, Some(installs)) => format!("{installs} installs"),
+            (spec::TRUST_REVIEWED, None) => "reviewed".to_string(),
+            _ => "unreviewed".to_string(),
+        };
+        lines.push(format!(
+            "{}  {}  ({standing}){note}",
+            hit.reference, hit.name
+        ));
         if !hit.summary.is_empty() {
-            println!("    {}", hit.summary);
+            lines.push(format!("    {}", hit.summary));
         }
     }
-    Ok(())
+    lines
 }
 
 async fn run_install(
@@ -293,7 +345,7 @@ async fn run_install(
             serde_json::json!({
                 "status": "installed", "ref": entry.reference, "kind": entry.kind,
                 "name": entry.name, "version": entry.version, "enabled": entry.enabled,
-                "unset_env": outcome.unset_header_env,
+                "trust": entry.trust, "env_file": entry.env_file,
             })
         );
     } else {
@@ -303,15 +355,17 @@ async fn run_install(
                 "skill `{}`",
                 entry.skill_name.as_deref().unwrap_or(&entry.name)
             ),
+            spec::Kind::Cli => format!("command-line tool `{}`", entry.name),
         };
         println!(
             "Installed {} {} as {what}. Start a new session to use it.",
             entry.title, entry.version
         );
-        if !outcome.unset_header_env.is_empty() {
+        if !entry.env_file.is_empty() {
             println!(
-                "Set these environment variables before starting the agent: {}",
-                outcome.unset_header_env.join(", ")
+                "Saved {} in {} (read when the agent starts).",
+                entry.env_file.join(", "),
+                env_file::env_file_path(codex_home).display()
             );
         }
     }
@@ -347,6 +401,11 @@ async fn run_list(
         let update = match (&item.update_available, &item.latest_version) {
             (true, Some(latest)) => format!("  (update: {latest})"),
             _ => String::new(),
+        };
+        let update = if item.reference.starts_with("tools:") {
+            format!("{update}  [unreviewed]")
+        } else {
+            update
         };
         println!(
             "{}  {}  {}  {state}{update}",
