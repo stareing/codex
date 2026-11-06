@@ -1,6 +1,10 @@
 //! Credentials and recovery bound to one remote-control login lifetime.
 //! A request can refresh credentials, but cannot adopt a replacement authentication owner.
 
+use super::protocol::RemoteControlTarget;
+use super::protocol::normalize_remote_control_url_trusting;
+use super::site_relay::SiteRelay;
+use super::site_relay::SiteRelayAuthProvider;
 use axum::http::HeaderMap;
 use axum::http::HeaderValue;
 use codex_api::SharedAuthProvider;
@@ -18,26 +22,40 @@ pub(super) struct RemoteControlAuth {
     manager: Arc<AuthManager>,
     pub(super) owner: crate::ConnectionAuth,
     pub(super) network_policy: codex_http_client::NetworkPolicy,
+    /// Onigio fork: when set, credentials come from the site relay's device token, not ChatGPT.
+    site_relay: Option<Arc<SiteRelay>>,
 }
 
 pub(super) struct RemoteControlRecovery {
     auth: RemoteControlAuth,
-    recovery: UnauthorizedRecovery,
+    /// `None` for the site relay: its device token has no refresh step; the launcher replaces it.
+    recovery: Option<UnauthorizedRecovery>,
 }
 
 impl RemoteControlAuth {
     pub(super) fn capture(manager: Arc<AuthManager>) -> (Self, bool) {
+        Self::capture_with_site_relay(manager, /*site_relay*/ None)
+    }
+
+    pub(super) fn capture_with_site_relay(
+        manager: Arc<AuthManager>,
+        site_relay: Option<Arc<SiteRelay>>,
+    ) -> (Self, bool) {
         loop {
             let owner = crate::ConnectionAuth::capture(&manager);
-            let authenticated = manager
-                .auth_cached()
-                .is_some_and(|auth| auth.uses_codex_backend() && auth.get_account_id().is_some());
+            let authenticated = match site_relay.as_deref() {
+                Some(site_relay) => site_relay.has_token(),
+                None => manager.auth_cached().is_some_and(|auth| {
+                    auth.uses_codex_backend() && auth.get_account_id().is_some()
+                }),
+            };
             if owner.is_current() {
                 return (
                     Self {
                         network_policy: manager.application_network_policy(),
                         manager,
                         owner,
+                        site_relay,
                     },
                     authenticated,
                 );
@@ -52,8 +70,20 @@ impl RemoteControlAuth {
     pub(super) fn unauthorized_recovery(&self) -> RemoteControlRecovery {
         RemoteControlRecovery {
             auth: self.clone(),
-            recovery: self.manager.unauthorized_recovery(),
+            recovery: self
+                .site_relay
+                .is_none()
+                .then(|| self.manager.unauthorized_recovery()),
         }
+    }
+
+    pub(super) fn site_relay(&self) -> Option<&SiteRelay> {
+        self.site_relay.as_deref()
+    }
+
+    /// Validates a remote control URL, trusting the site relay's host when one is configured.
+    pub(super) fn target(&self, remote_control_url: &str) -> io::Result<RemoteControlTarget> {
+        normalize_remote_control_url_trusting(remote_control_url, self.site_relay())
     }
 
     pub(super) fn auth_change_receiver(&self) -> watch::Receiver<u64> {
@@ -90,9 +120,24 @@ pub(super) async fn load_remote_control_auth(
     auth: &RemoteControlAuth,
 ) -> io::Result<RemoteControlConnectionAuth> {
     auth.ensure_current()?;
-    let credentials = load_auth_manager(&auth.manager).await?;
+    let credentials = match auth.site_relay() {
+        Some(site_relay) => load_site_relay(&auth.manager, site_relay)?,
+        None => load_auth_manager(&auth.manager).await?,
+    };
     auth.ensure_current()?;
     Ok(credentials)
+}
+
+fn load_site_relay(
+    auth_manager: &AuthManager,
+    site_relay: &SiteRelay,
+) -> io::Result<RemoteControlConnectionAuth> {
+    let token = site_relay.read_token()?;
+    Ok(RemoteControlConnectionAuth {
+        http_client_factory: auth_manager.http_client_factory(),
+        auth_provider: Arc::new(SiteRelayAuthProvider::new(&token)?),
+        account_id: site_relay.account_id().to_string(),
+    })
 }
 
 async fn load_auth_manager(
@@ -181,7 +226,9 @@ pub(super) async fn recover_remote_control_auth(
     if recovery.auth.ensure_current().is_err() {
         return false;
     }
-    let auth_recovery = &mut recovery.recovery;
+    let Some(auth_recovery) = recovery.recovery.as_mut() else {
+        return false;
+    };
     if !auth_recovery.has_next() {
         return false;
     }

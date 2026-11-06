@@ -11,7 +11,10 @@ mod host_device;
 mod protocol;
 mod segment;
 mod server_api;
+mod site_relay;
 mod websocket;
+
+pub use self::site_relay::SiteRelay;
 
 use self::auth::load_remote_control_auth;
 use self::auth::recover_remote_control_auth;
@@ -29,7 +32,6 @@ pub use self::protocol::ClientId;
 use self::protocol::RemoteControlPairingStatusCode;
 use self::protocol::ServerEvent;
 use self::protocol::StreamId;
-use self::protocol::normalize_remote_control_url;
 use super::CHANNEL_CAPACITY;
 use super::TransportEvent;
 use super::next_connection_id;
@@ -67,6 +69,9 @@ pub struct RemoteControlStartConfig {
     pub remote_control_url: String,
     pub installation_id: String,
     pub policy: RemoteControlPolicy,
+    /// Onigio fork: authenticate to this relay with its device token instead of ChatGPT.
+    /// `remote_control_url` must then be the relay's URL.
+    pub site_relay: Option<SiteRelay>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -408,7 +413,7 @@ impl RemoteControlSession {
             .as_deref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, RemoteControlUnavailable))?;
         let auth = load_remote_control_auth(&self.auth_manager).await?;
-        let remote_control_target = normalize_remote_control_url(&self.remote_control_url)?;
+        let remote_control_target = self.auth_manager.target(&self.remote_control_url)?;
         let app_server_client_name = self.pairing_persistence_key(app_server_client_name)?;
         self.set_preference(
             state_db,
@@ -611,7 +616,7 @@ impl RemoteControlSession {
         app_server_client_name: Option<&str>,
         selection: RemoteControlEnrollmentSelection,
     ) -> io::Result<(RemoteControlEnrollment, bool)> {
-        let remote_control_target = normalize_remote_control_url(&self.remote_control_url)?;
+        let remote_control_target = self.auth_manager.target(&self.remote_control_url)?;
         match selection {
             RemoteControlEnrollmentSelection::ReuseOrCreate => {
                 if let Some(enrollment) = current_enrollment

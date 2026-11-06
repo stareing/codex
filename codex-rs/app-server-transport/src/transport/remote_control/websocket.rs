@@ -569,9 +569,7 @@ impl RemoteControlWebsocket {
         &mut self,
         app_server_client_name: Option<&str>,
     ) -> bool {
-        let remote_control_target = match super::protocol::normalize_remote_control_url(
-            &self.remote_control_url,
-        ) {
+        let remote_control_target = match self.auth_manager.target(&self.remote_control_url) {
             Ok(remote_control_target) => remote_control_target,
             Err(err) => {
                 warn!(
@@ -673,7 +671,7 @@ impl RemoteControlWebsocket {
             .publish_status(RemoteControlConnectionStatus::Connecting);
         let remote_control_target = match self.remote_control_target.as_ref() {
             Some(remote_control_target) => remote_control_target.clone(),
-            None => match super::protocol::normalize_remote_control_url(&self.remote_control_url) {
+            None => match self.auth_manager.target(&self.remote_control_url) {
                 Ok(remote_control_target) => {
                     self.remote_control_target = Some(remote_control_target.clone());
                     remote_control_target

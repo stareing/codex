@@ -1,7 +1,6 @@
 use super::RemoteControlEnableError;
 use super::RemoteControlSession;
 use super::RemoteControlUnavailable;
-use super::protocol::normalize_remote_control_url;
 use super::publish_current_enrollment;
 use super::websocket::RemoteControlStatusPublisher;
 use codex_app_server_protocol::RemoteControlStatusChangedNotification;
@@ -65,7 +64,7 @@ impl RemoteControlSession {
             .as_deref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, RemoteControlUnavailable))?;
         let auth = super::auth::load_remote_control_auth(&self.auth_manager).await?;
-        let remote_control_target = normalize_remote_control_url(&self.remote_control_url)?;
+        let remote_control_target = self.auth_manager.target(&self.remote_control_url)?;
         let app_server_client_name = self.pairing_persistence_key(app_server_client_name)?;
         let _persistence =
             super::persistence::read_lock(&self.auth_manager, &self.persistence).await?;
@@ -104,7 +103,7 @@ impl RemoteControlSession {
             .as_deref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, RemoteControlUnavailable))?;
         let mut auth = super::auth::load_remote_control_auth(&self.auth_manager).await?;
-        let remote_control_target = normalize_remote_control_url(&self.remote_control_url)?;
+        let remote_control_target = self.auth_manager.target(&self.remote_control_url)?;
         let app_server_client_name = self.pairing_persistence_key(app_server_client_name)?;
         let app_server_client_name = app_server_client_name.as_deref();
         let status = self.status();
