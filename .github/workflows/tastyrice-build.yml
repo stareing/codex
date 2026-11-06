@@ -157,8 +157,11 @@ jobs:
       # under the temp dir that the integration tests use as CODEX_HOME. codex-http-client runs only
       # the fork's client_builder tests: its route_aware TLS-fallback tests also fail at the upstream
       # merge base when the crate is tested on its own (checked 2026-11-06 at b334d5b3f2).
-      # codex-model-provider runs single-threaded: its encrypted-secrets test fails when the `age`
-      # scrypt work estimate (measured under parallel tests on a 4-core runner) exceeds its limit.
+      # codex-model-provider and codex-login run single-threaded: their encrypted-secrets tests fail
+      # when the `age` scrypt work estimate (measured under parallel tests on a 4-core runner) exceeds
+      # its limit ("failed to decrypt secrets file", which gateway_auth reports as "failed to load
+      # provider OAuth credentials"). codex-login passed in run 42181068758 and four of its
+      # secrets-backed tests failed in run 42218297229 with identical login/secrets code.
       # Every command runs; the step fails at the end if any of them failed.
       # server_api's response_body_timeout_is_transient fails at the fork's pre-remote-control-patch
       # commit too (3b3a1c527c, local run 2026-11-06): not caused by the site relay patch.
@@ -172,7 +175,8 @@ jobs:
           bash .github/tastyrice/in-rust-container.sh "export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
             failed=()
             run() { echo \"::group::\$*\"; cargo test --release --locked \"\$@\" || failed+=(\"\$*\"); echo ::endgroup::; }
-            run -p codex-api -p codex-config -p codex-login -p codex-model-provider-info -p codex-models-manager -p codex-protocol
+            run -p codex-api -p codex-config -p codex-model-provider-info -p codex-models-manager -p codex-protocol
+            run -p codex-login -- --test-threads=1
             run -p codex-model-provider -- --test-threads=1
             run -p codex-http-client --lib client_builder
             run -p codex-app-server-transport --lib transport::remote_control -- \\
