@@ -16,6 +16,7 @@ fn auth() -> RemoteControlConnectionAuth {
         ),
         auth_provider: codex_model_provider::unauthenticated_auth_provider(),
         account_id: "account-a".to_string(),
+        account_header: crate::transport::remote_control::auth::REMOTE_CONTROL_ACCOUNT_ID_HEADER,
     }
 }
 

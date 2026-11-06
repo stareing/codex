@@ -75,8 +75,14 @@ async fn site_relay_enrolls_and_connects_with_the_device_token() {
     assert_eq!(
         enroll_request
             .headers
-            .get_all(REMOTE_CONTROL_ACCOUNT_ID_HEADER),
+            .get_all(crate::transport::remote_control::auth::SITE_RELAY_ACCOUNT_ID_HEADER),
         vec!["u42"]
+    );
+    assert!(
+        enroll_request
+            .headers
+            .get_all(REMOTE_CONTROL_ACCOUNT_ID_HEADER)
+            .is_empty()
     );
     respond_with_json(
         enroll_request.stream,
