@@ -2541,6 +2541,7 @@ dependencies = [
  "codex-rollout",
  "codex-rollout-trace",
  "codex-sandboxing",
+ "codex-skills",
  "codex-skills-extension",
  "codex-state",
  "codex-stdio-to-uds",
@@ -2597,6 +2598,7 @@ dependencies = [
  "which 8.0.0",
  "windows-sys 0.52.0",
  "wiremock",
+ "zip",
  "zstd",
 ]
 
