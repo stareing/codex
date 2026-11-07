@@ -994,6 +994,11 @@ client_request_definitions! {
         serialization: None,
         response: v2::FsReadDirectoryResponse,
     },
+    FsSearchText => "fs/searchText" {
+        params: v2::FsSearchTextParams,
+        serialization: None,
+        response: v2::FsSearchTextResponse,
+    },
     FsRemove => "fs/remove" {
         params: v2::FsRemoveParams,
         serialization: None,

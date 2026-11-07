@@ -9,6 +9,9 @@ use crate::fuzzy_file_search::FuzzyFileSearchSession;
 use crate::fuzzy_file_search::run_fuzzy_file_search;
 use crate::fuzzy_file_search::start_fuzzy_file_search_session;
 use crate::outgoing_message::OutgoingMessageSender;
+use codex_app_server_protocol::FsSearchTextMatch;
+use codex_app_server_protocol::FsSearchTextParams;
+use codex_app_server_protocol::FsSearchTextResponse;
 use codex_app_server_protocol::FuzzyFileSearchParams;
 use codex_app_server_protocol::FuzzyFileSearchResponse;
 use codex_app_server_protocol::FuzzyFileSearchSessionStartParams;
@@ -18,6 +21,7 @@ use codex_app_server_protocol::FuzzyFileSearchSessionStopResponse;
 use codex_app_server_protocol::FuzzyFileSearchSessionUpdateParams;
 use codex_app_server_protocol::FuzzyFileSearchSessionUpdateResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
+use codex_file_search::text_search;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -34,6 +38,53 @@ impl SearchRequestProcessor {
             pending_fuzzy_searches: Arc::new(Mutex::new(HashMap::new())),
             fuzzy_search_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// `fs/searchText`: blocking walk off the runtime, bounded by `text_search`'s limits.
+    pub(crate) async fn search_text(
+        &self,
+        params: FsSearchTextParams,
+    ) -> Result<FsSearchTextResponse, JSONRPCErrorError> {
+        let FsSearchTextParams {
+            root,
+            query,
+            case_sensitive,
+            max_results,
+        } = params;
+        let root = root.to_path_buf();
+        if !root.is_dir() {
+            return Err(invalid_request(format!(
+                "fs/searchText: `{}` is not a folder",
+                root.display()
+            )));
+        }
+        let limits = text_search::TextSearchLimits {
+            max_results: max_results.map_or(text_search::DEFAULT_MAX_RESULTS, |n| n as usize),
+            ..Default::default()
+        };
+        let found = tokio::task::spawn_blocking(move || {
+            text_search::search_text(
+                &root,
+                &query,
+                case_sensitive.unwrap_or(false),
+                limits,
+                &AtomicBool::new(false),
+            )
+        })
+        .await
+        .map_err(|err| internal_error(format!("fs/searchText failed: {err}")))?;
+        Ok(FsSearchTextResponse {
+            matches: found
+                .matches
+                .into_iter()
+                .map(|m| FsSearchTextMatch {
+                    path: m.path.to_string_lossy().into_owned(),
+                    line_number: u32::try_from(m.line_number).unwrap_or(u32::MAX),
+                    line: m.line,
+                })
+                .collect(),
+            truncated: found.truncated,
+        })
     }
 
     pub(crate) async fn fuzzy_file_search(

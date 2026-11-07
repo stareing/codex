@@ -150,6 +150,55 @@ async fn fs_methods_return_error_when_local_environment_is_disabled() -> Result<
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fs_search_text_finds_lines_relative_to_the_folder() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let folder = codex_home.path().join("work");
+    std::fs::create_dir_all(folder.join("src"))?;
+    std::fs::write(
+        folder.join("src/lib.rs"),
+        "pub fn alpha() {}\n// Alpha again\n",
+    )?;
+    let mut mcp = initialized_mcp(&codex_home).await?;
+
+    let id = mcp
+        .send_raw_request(
+            "fs/searchText",
+            Some(serde_json::json!({"root": folder, "query": "alpha", "maxResults": 1})),
+        )
+        .await?;
+    let response = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(id)),
+    )
+    .await??;
+    assert_eq!(
+        response.result,
+        serde_json::json!({
+            "matches": [{"path": "src/lib.rs", "lineNumber": 1, "line": "pub fn alpha() {}"}],
+            "truncated": true,
+        })
+    );
+
+    let missing = mcp
+        .send_raw_request(
+            "fs/searchText",
+            Some(serde_json::json!({"root": folder.join("nope"), "query": "a"})),
+        )
+        .await?;
+    let error = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(missing)),
+    )
+    .await??;
+    assert!(
+        error.error.message.contains("is not a folder"),
+        "{}",
+        error.error.message
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fs_read_file_refuses_a_file_larger_than_max_bytes() -> Result<()> {
     let codex_home = TempDir::new()?;
     let file_path = codex_home.path().join("five.txt");

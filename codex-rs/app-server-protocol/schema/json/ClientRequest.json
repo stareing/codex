@@ -1357,6 +1357,43 @@
       ],
       "type": "object"
     },
+    "FsSearchTextParams": {
+      "description": "Find the lines that contain `query` (a literal) in the files under `root`.",
+      "properties": {
+        "caseSensitive": {
+          "description": "Defaults to `false` (case-insensitive).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "maxResults": {
+          "description": "Defaults to 200, at most 1000.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "query": {
+          "type": "string"
+        },
+        "root": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Absolute folder to search."
+        }
+      },
+      "required": [
+        "query",
+        "root"
+      ],
+      "type": "object"
+    },
     "FsUnwatchParams": {
       "description": "Stop filesystem watch notifications for a prior `fs/watch`.",
       "properties": {
@@ -7297,6 +7334,30 @@
         "params"
       ],
       "title": "Fs/readDirectoryRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "fs/searchText"
+          ],
+          "title": "Fs/searchTextRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/FsSearchTextParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Fs/searchTextRequest",
       "type": "object"
     },
     {

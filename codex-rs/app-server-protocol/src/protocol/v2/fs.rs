@@ -124,6 +124,45 @@ pub struct FsReadDirectoryResponse {
     pub entries: Vec<FsReadDirectoryEntry>,
 }
 
+/// Find the lines that contain `query` (a literal) in the files under `root`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct FsSearchTextParams {
+    /// Absolute folder to search.
+    pub root: AbsolutePathBuf,
+    pub query: String,
+    /// Defaults to `false` (case-insensitive).
+    #[ts(optional = nullable)]
+    pub case_sensitive: Option<bool>,
+    /// Defaults to 200, at most 1000.
+    #[ts(optional = nullable)]
+    pub max_results: Option<u32>,
+}
+
+/// One matching line from `fs/searchText`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct FsSearchTextMatch {
+    /// Relative to `root`.
+    pub path: String,
+    /// 1-based.
+    pub line_number: u32,
+    /// The line, trimmed and cut to 300 characters.
+    pub line: String,
+}
+
+/// Matches returned by `fs/searchText`, in path order.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct FsSearchTextResponse {
+    pub matches: Vec<FsSearchTextMatch>,
+    /// The search stopped early (result limit, deadline or cancelled).
+    pub truncated: bool,
+}
+
 /// Remove a file or directory tree from the host filesystem.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
