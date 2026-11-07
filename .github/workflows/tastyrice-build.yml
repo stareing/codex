@@ -114,7 +114,7 @@ jobs:
       - name: Build onigio-agent and the sandbox helpers
         run: |
           cargo build --target "$TARGET" --release --locked -p codex-cli --bin codex \
-            -p codex-windows-sandbox --bin codex-command-runner --bin codex-windows-sandbox-setup
+            -p codex-windows-sandbox --bin onigio-command-runner --bin onigio-windows-sandbox-setup
       - name: Package
         shell: pwsh
         working-directory: ${{ github.workspace }}
@@ -122,8 +122,8 @@ jobs:
           $release = Join-Path $env:CARGO_TARGET_DIR "$env:TARGET/release"
           $stage = New-Item -ItemType Directory -Force -Path dist-windows
           Copy-Item (Join-Path $release 'codex.exe') (Join-Path $stage 'onigio-agent.exe')
-          Copy-Item (Join-Path $release 'codex-command-runner.exe') $stage
-          Copy-Item (Join-Path $release 'codex-windows-sandbox-setup.exe') $stage
+          Copy-Item (Join-Path $release 'onigio-command-runner.exe') $stage
+          Copy-Item (Join-Path $release 'onigio-windows-sandbox-setup.exe') $stage
           & (Join-Path $stage 'onigio-agent.exe') --version
           if ($LASTEXITCODE -ne 0) { throw 'onigio-agent.exe --version failed' }
           $zip = 'onigio-agent-x86_64-pc-windows-msvc.zip'
