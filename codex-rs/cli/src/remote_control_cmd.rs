@@ -27,6 +27,8 @@ use tokio::time::timeout;
 const FOREGROUND_SOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const FOREGROUND_SOCKET_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(50);
 const FOREGROUND_APP_SERVER_ABORT_TIMEOUT: Duration = Duration::from_secs(1);
+/// Printed before the ready lines when a sessions file is given; the desktop app reads it.
+pub(crate) const CONTROL_SOCKET_PREFIX: &str = "Control socket: ";
 
 #[derive(Debug, Args)]
 pub(crate) struct RemoteControlCommand {
@@ -214,6 +216,8 @@ async fn run_foreground_remote_control(
     let transport = AppServerTransport::UnixSocket {
         socket_path: socket_path.clone(),
     };
+    // The desktop app (it passes the sessions file) joins this server with `app-server proxy --sock … --lines`.
+    let announce_socket = sessions_file.is_some().then(|| socket_path.clone());
     let runtime_options = AppServerRuntimeOptions {
         remote_control_startup_mode: codex_app_server::RemoteControlStartupMode::EnabledEphemeral,
         install_shutdown_signal_handler: false,
@@ -265,6 +269,11 @@ async fn run_foreground_remote_control(
         return Ok(());
     }
 
+    if let Some(socket) = &announce_socket
+        && !json
+    {
+        println!("{CONTROL_SOCKET_PREFIX}{}", socket.as_path().display());
+    }
     if let Err(error) = print_foreground_ready_output(&summary, json) {
         abort_foreground_app_server(app_server_task).await;
         stop_signal_task.abort();

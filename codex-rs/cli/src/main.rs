@@ -720,6 +720,11 @@ struct AppServerProxyCommand {
     /// Path to the app-server Unix domain socket to connect to.
     #[arg(long = "sock", value_name = "SOCKET_PATH", value_parser = parse_socket_path)]
     socket_path: Option<AbsolutePathBuf>,
+
+    /// Speak one JSON-RPC message per line on stdin/stdout (like `--listen stdio://`) instead of relaying
+    /// raw bytes; the socket side is the server's WebSocket.
+    #[arg(long = "lines")]
+    lines: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1444,7 +1449,11 @@ async fn cli_main(
                             codex_app_server::app_server_control_socket_path(&codex_home)?
                         }
                     };
-                    codex_stdio_to_uds::run(socket_path.as_path()).await?;
+                    if proxy_cli.lines {
+                        codex_app_server_daemon::proxy_lines(socket_path.as_path()).await?;
+                    } else {
+                        codex_stdio_to_uds::run(socket_path.as_path()).await?;
+                    }
                 }
                 Some(AppServerSubcommand::GenerateTs(gen_cli)) => {
                     let options = codex_app_server_protocol::GenerateTsOptions {
@@ -4683,7 +4692,8 @@ mod tests {
         assert!(matches!(
             app_server.subcommand,
             Some(AppServerSubcommand::Proxy(AppServerProxyCommand {
-                socket_path: None
+                socket_path: None,
+                lines: false,
             }))
         ));
     }
@@ -4769,8 +4779,30 @@ mod tests {
     }
 
     #[test]
+    fn app_server_proxy_lines_parses() {
+        let app_server = app_server_from_args(
+            [
+                "codex",
+                "app-server",
+                "proxy",
+                "--sock",
+                "codex.sock",
+                "--lines",
+            ]
+            .as_ref(),
+        );
+        let Some(AppServerSubcommand::Proxy(proxy)) = app_server.subcommand else {
+            panic!("expected proxy subcommand");
+        };
+        assert!(proxy.lines);
+    }
+
+    #[test]
     fn reject_remote_auth_token_env_for_app_server_proxy() {
-        let subcommand = AppServerSubcommand::Proxy(AppServerProxyCommand { socket_path: None });
+        let subcommand = AppServerSubcommand::Proxy(AppServerProxyCommand {
+            socket_path: None,
+            lines: false,
+        });
         let err = reject_remote_mode_for_app_server_subcommand(
             /*remote*/ None,
             Some("CODEX_REMOTE_AUTH_TOKEN"),

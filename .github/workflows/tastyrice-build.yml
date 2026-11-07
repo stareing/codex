@@ -187,7 +187,7 @@ jobs:
             run -p codex-http-client --lib client_builder
             run -p codex-app-server-transport --lib transport::remote_control -- \\
               --skip transport::remote_control::server_api::tests::response_body_timeout_is_transient
-            run -p codex-cli --bin codex -- site_login site_password host_info brand remote_control allow_defaults
+            run -p codex-cli --bin codex -- site_login site_password host_info brand remote_control allow_defaults app_server_proxy
             run -p codex-cli --test site_account_names
             run -p codex-core --lib site_account_provider
             run -p codex-app-server --lib remote_roots
@@ -196,6 +196,7 @@ jobs:
             run -p codex-app-server-protocol
             run -p codex-file-search --lib text_search
             run -p codex-app-server-daemon --lib remote_control_folders
+            run -p codex-app-server-daemon --lib line_proxy
             run -p codex-app-server-transport --lib remote_allowed_roots
             run -p codex-core --lib unified_exec
             run -p codex-core --test all suite::unified_exec -- \\
