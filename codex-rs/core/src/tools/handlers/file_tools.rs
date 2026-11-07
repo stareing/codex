@@ -29,6 +29,8 @@ use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::apply_patch::apply_patch_file_update_mode;
 use crate::tools::handlers::apply_patch::execute_verified_patch;
+use crate::tools::handlers::file_access::Access;
+use crate::tools::handlers::file_access::ensure_access;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::registry::CoreToolRuntime;
@@ -90,7 +92,10 @@ pub(crate) fn text(description: &str) -> JsonSchema {
     JsonSchema::string(Some(description.to_string()))
 }
 
-pub(crate) fn function_arguments(payload: ToolPayload, tool: &str) -> Result<String, FunctionCallError> {
+pub(crate) fn function_arguments(
+    payload: ToolPayload,
+    tool: &str,
+) -> Result<String, FunctionCallError> {
     match payload {
         ToolPayload::Function { arguments } => Ok(arguments),
         _ => Err(FunctionCallError::RespondToModel(format!(
@@ -154,6 +159,25 @@ impl Target {
             path,
             shown,
         })
+    }
+
+    /// The permission check of `file_access.rs` for this file.
+    async fn ensure(
+        &self,
+        invocation: &ToolInvocation,
+        tool: &str,
+        raw: &str,
+        access: Access,
+    ) -> Result<(), FunctionCallError> {
+        ensure_access(
+            invocation,
+            &self.environment,
+            tool,
+            raw,
+            &self.path.to_path_buf(),
+            access,
+        )
+        .await
     }
 
     fn sandbox(&self) -> FileSystemSandboxContext {
@@ -475,6 +499,9 @@ impl ToolExecutor<ToolInvocation> for ReadFileHandler {
                 args.environment_id.as_deref(),
                 self.multi_environment,
             )?;
+            target
+                .ensure(&invocation, READ_TOOL_NAME, &args.file_path, Access::Read)
+                .await?;
             let fs = target.environment.environment.get_filesystem();
             let Some(text) = target.read_text(fs.as_ref()).await? else {
                 return Err(refuse(format!("`{}` does not exist", target.shown)));
@@ -540,6 +567,9 @@ impl ToolExecutor<ToolInvocation> for EditFileHandler {
                 args.environment_id.as_deref(),
                 self.multi_environment,
             )?;
+            target
+                .ensure(&invocation, EDIT_TOOL_NAME, &args.file_path, Access::Write)
+                .await?;
             let fs = target.environment.environment.get_filesystem();
             let Some(text) = target.read_text(fs.as_ref()).await? else {
                 return Err(refuse(format!(
@@ -595,6 +625,9 @@ impl ToolExecutor<ToolInvocation> for WriteFileHandler {
                 args.environment_id.as_deref(),
                 self.multi_environment,
             )?;
+            target
+                .ensure(&invocation, WRITE_TOOL_NAME, &args.file_path, Access::Write)
+                .await?;
             let fs = target.environment.environment.get_filesystem();
             let old = target.read_text(fs.as_ref()).await?;
             if old.as_deref() == Some(args.content.as_str()) {

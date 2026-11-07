@@ -10,6 +10,7 @@ mod list_available_plugins_to_install;
 pub(crate) mod list_available_plugins_to_install_spec;
 mod mcp;
 mod mcp_resource;
+pub(crate) mod file_access;
 pub(crate) mod search_tools;
 pub(crate) mod mcp_resource_spec;
 pub(crate) mod multi_agents;

@@ -202,6 +202,7 @@ jobs:
             run -p codex-core --lib unified_exec
             run -p codex-core --lib file_tools
             run -p codex-core --lib search_tools
+            run -p codex-core --lib file_access
             run -p codex-core --lib models_without_apply_patch_get_the_file_tools
             run -p codex-core --test all suite::file_tools::
             run -p codex-core --test all suite::unified_exec -- \\
