@@ -534,6 +534,8 @@ impl TurnRequestProcessor {
                 })?;
         self.ensure_direct_input_allowed(&request_id, thread.as_ref())
             .await?;
+        // A rewind of this thread's files is writing them: no turn until it finished.
+        crate::request_processors::ensure_no_restore(thread.as_ref(), thread_id).await?;
         self.config_manager
             .check_thread_model_provider(thread.config().await.as_ref())
             .await

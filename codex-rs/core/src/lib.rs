@@ -76,6 +76,7 @@ mod agent_communication;
 mod agent_message_board;
 pub use agent_message_board::install_agent_message_board;
 mod attestation;
+mod checkpoints;
 mod codex_delegate;
 mod command_canonicalization;
 pub mod config;

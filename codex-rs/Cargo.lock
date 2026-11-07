@@ -2082,6 +2082,7 @@ dependencies = [
  "codex-aws-auth",
  "codex-backend-client",
  "codex-chatgpt",
+ "codex-checkpoint",
  "codex-cloud-config",
  "codex-code-mode",
  "codex-config",
@@ -2489,6 +2490,19 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "codex-checkpoint"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "similar",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2919,6 +2933,7 @@ dependencies = [
  "codex-apply-patch",
  "codex-async-utils",
  "codex-attachment-store",
+ "codex-checkpoint",
  "codex-client",
  "codex-code-mode",
  "codex-config",

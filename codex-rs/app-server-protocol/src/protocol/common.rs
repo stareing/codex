@@ -757,6 +757,26 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadRevertResponse,
     },
+    #[experimental("thread/checkpoint/list")]
+    ThreadCheckpointList => "thread/checkpoint/list" {
+        params: v2::ThreadCheckpointListParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadCheckpointListResponse,
+    },
+    #[experimental("thread/checkpoint/rewindFiles")]
+    ThreadCheckpointRewindFiles => "thread/checkpoint/rewindFiles" {
+        params: v2::ThreadCheckpointRewindFilesParams,
+        serialization: thread_id(params.thread_id),
+        manual_payload_conversion: manual,
+        response: v2::ThreadCheckpointRewindResponse,
+    },
+    #[experimental("thread/checkpoint/undoRewind")]
+    ThreadCheckpointUndoRewind => "thread/checkpoint/undoRewind" {
+        params: v2::ThreadCheckpointUndoRewindParams,
+        serialization: thread_id(params.thread_id),
+        manual_payload_conversion: manual,
+        response: v2::ThreadCheckpointRewindResponse,
+    },
     ThreadList => "thread/list" {
         params: v2::ThreadListParams,
         inspect_params: true,
@@ -1928,6 +1948,8 @@ server_notification_definitions! {
     ThreadUnarchived => "thread/unarchived" (v2::ThreadUnarchivedNotification),
     ThreadClosed => "thread/closed" (v2::ThreadClosedNotification),
     ThreadReverted => "thread/reverted" (v2::ThreadRevertedNotification),
+    #[experimental("thread/checkpoint/restored")]
+    ThreadCheckpointRestored => "thread/checkpoint/restored" (v2::ThreadCheckpointRestoredNotification),
     SkillsChanged => "skills/changed" (v2::SkillsChangedNotification),
     ThreadNameUpdated => "thread/name/updated" (v2::ThreadNameUpdatedNotification),
     ThreadAttachmentUpdated => "thread/attachment/updated" (v2::ThreadAttachmentUpdatedNotification),

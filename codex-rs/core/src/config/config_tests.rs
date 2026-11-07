@@ -13464,3 +13464,53 @@ fn sqlite_home_env_conflict_reports_an_override() -> std::io::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn checkpoint_config_defaults_and_refuses_unworkable_values() {
+    use codex_config::config_toml::CheckpointToml;
+    let defaults = codex_checkpoint::CheckpointConfig::default();
+    assert_eq!(checkpoint_config(None).unwrap(), defaults);
+    let off = checkpoint_config(Some(&CheckpointToml {
+        enabled: Some(false),
+        ..Default::default()
+    }))
+    .unwrap();
+    assert!(!off.enabled);
+    assert_eq!(off.max_snapshots, defaults.max_snapshots);
+    for invalid in [
+        CheckpointToml {
+            max_snapshots: Some(0),
+            ..Default::default()
+        },
+        CheckpointToml {
+            max_file_bytes: Some(0),
+            ..Default::default()
+        },
+        CheckpointToml {
+            max_file_bytes: Some(10),
+            max_total_bytes: Some(9),
+            ..Default::default()
+        },
+    ] {
+        let err = checkpoint_config(Some(&invalid)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{invalid:?}");
+    }
+}
+
+#[test]
+fn checkpoint_section_parses_from_toml() {
+    let cfg: ConfigToml = toml::from_str(
+        "[checkpoint]\nenabled = false\nmax_snapshots = 5\nmax_file_bytes = 100\nmax_total_bytes = 1000\n",
+    )
+    .unwrap();
+    let parsed = checkpoint_config(cfg.checkpoint.as_ref()).unwrap();
+    assert_eq!(
+        parsed,
+        codex_checkpoint::CheckpointConfig {
+            enabled: false,
+            max_snapshots: 5,
+            max_file_bytes: 100,
+            max_total_bytes: 1000,
+        }
+    );
+}

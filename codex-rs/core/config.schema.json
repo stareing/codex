@@ -509,6 +509,34 @@
       },
       "type": "object"
     },
+    "CheckpointToml": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Record checkpoints (default true).",
+          "type": "boolean"
+        },
+        "max_file_bytes": {
+          "description": "Files larger than this many bytes are tracked without a copy (default 10 MiB).",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_snapshots": {
+          "description": "Checkpoints kept per thread (default 100, at least 1).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "description": "Bytes one thread's backups may take (default 1 GiB, at least `max_file_bytes`).",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "CloudToml": {
       "additionalProperties": false,
       "description": "Cloud-owned feature settings.",
@@ -6630,6 +6658,15 @@
     "check_for_update_on_startup": {
       "description": "When `true`, checks for Codex updates on startup and surfaces update prompts. Set to `false` only if your Codex updates are centrally managed. Defaults to `true`.",
       "type": "boolean"
+    },
+    "checkpoint": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/CheckpointToml"
+        }
+      ],
+      "default": null,
+      "description": "File checkpoints per turn: the agent's file edits can be rewound to how they were when a turn started."
     },
     "cli_auth_credentials_store": {
       "allOf": [

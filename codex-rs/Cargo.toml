@@ -34,6 +34,7 @@ members = [
     "cloud-tasks",
     "cloud-tasks-client",
     "cloud-tasks-mock-client",
+    "checkpoint",
     "cli",
     "collaboration-mode-templates",
     "connectors",
@@ -202,6 +203,7 @@ codex-home = { path = "codex-home" }
 codex-http-client = { path = "http-client" }
 codex-websocket-auth = { path = "websocket-auth" }
 codex-websocket-client = { path = "websocket-client" }
+codex-checkpoint = { path = "checkpoint" }
 codex-config = { path = "config" }
 codex-connectors = { path = "connectors" }
 codex-agent-extension = { path = "ext/agent" }

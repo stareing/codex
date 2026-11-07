@@ -375,6 +375,15 @@ pub(crate) async fn run_turn(
         return Ok(None);
     }
 
+    // Before the turn changes anything; a rewind to this turn restores the files to this point.
+    crate::checkpoints::snapshot_turn(
+        &sess,
+        &turn_context.config,
+        &turn_context.sub_id,
+        first_step_context.environments.local(),
+    )
+    .await;
+
     // Only speculate after hooks accept the turn, using its finalized tools and permissions.
     {
         let mut state = sess.state.lock().await;

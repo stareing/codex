@@ -247,6 +247,33 @@ impl Default for GhostSnapshotConfig {
     }
 }
 
+/// `[checkpoint]` with its defaults; values that cannot work are refused rather than adjusted.
+fn checkpoint_config(
+    toml: Option<&codex_config::config_toml::CheckpointToml>,
+) -> std::io::Result<codex_checkpoint::CheckpointConfig> {
+    let defaults = codex_checkpoint::CheckpointConfig::default();
+    let Some(toml) = toml else {
+        return Ok(defaults);
+    };
+    let config = codex_checkpoint::CheckpointConfig {
+        enabled: toml.enabled.unwrap_or(defaults.enabled),
+        max_snapshots: toml.max_snapshots.unwrap_or(defaults.max_snapshots),
+        max_file_bytes: toml.max_file_bytes.unwrap_or(defaults.max_file_bytes),
+        max_total_bytes: toml.max_total_bytes.unwrap_or(defaults.max_total_bytes),
+    };
+    let invalid = |message: &str| std::io::Error::new(std::io::ErrorKind::InvalidInput, message.to_string());
+    if config.max_snapshots == 0 {
+        return Err(invalid("checkpoint.max_snapshots must be at least 1"));
+    }
+    if config.max_file_bytes == 0 {
+        return Err(invalid("checkpoint.max_file_bytes must be at least 1"));
+    }
+    if config.max_total_bytes < config.max_file_bytes {
+        return Err(invalid("checkpoint.max_total_bytes must be at least checkpoint.max_file_bytes"));
+    }
+    Ok(config)
+}
+
 /// Maximum number of bytes of the documentation that will be embedded. Larger
 /// files are *silently truncated* to this size so we do not take up too much of
 /// the context window.
@@ -1090,6 +1117,9 @@ pub struct Config {
     /// Compatibility-only settings retained for legacy `ghost_snapshot`
     /// config loading.
     pub ghost_snapshot: GhostSnapshotConfig,
+
+    /// File checkpoints per turn (`[checkpoint]`).
+    pub checkpoint: codex_checkpoint::CheckpointConfig,
 
     /// Settings specific to the task-path-based multi-agent tool surface.
     pub multi_agent_v2: MultiAgentV2Config,
@@ -3948,6 +3978,8 @@ impl Config {
             config
         };
 
+        let checkpoint = checkpoint_config(cfg.checkpoint.as_ref())?;
+
         let forced_chatgpt_workspace_id = cfg
             .forced_chatgpt_workspace_id
             .clone()
@@ -4447,6 +4479,7 @@ impl Config {
             background_terminal_max_timeout,
             thread_unload_delay,
             ghost_snapshot,
+            checkpoint,
             multi_agent_v2,
             token_budget,
             token_budget_startup_config: None,

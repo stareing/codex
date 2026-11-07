@@ -203,6 +203,10 @@ jobs:
             run -p codex-core --lib file_tools
             run -p codex-core --lib search_tools
             run -p codex-core --lib file_access
+            run -p codex-checkpoint
+            run -p codex-app-server --lib thread_checkpoint
+            run -p codex-app-server --test all suite::v2::thread_checkpoint::
+            run -p codex-core --lib checkpoint_
             run -p codex-core --lib models_without_apply_patch_get_the_file_tools
             run -p codex-core --test all suite::file_tools::
             run -p codex-core --test all suite::unified_exec -- \\

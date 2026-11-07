@@ -328,6 +328,30 @@ and migration remain supported so resuming, reading, and forking those threads
 preserves the surviving history. This disk compatibility does not require restoring
 support for new `thread/rollback` requests.
 
+# File checkpoints
+
+Experimental. When a turn starts, the agent records the files it has changed in the thread so far; before a
+patch (Edit/Write/apply_patch) first changes a file, it keeps that file's prior content. Changes made by shell
+commands, by `fs/*` client calls, or outside the agent are not tracked. The store is
+`$CODEX_HOME/checkpoints/<thread id>/` on the machine the files are on; `[checkpoint]` configures it (`enabled`,
+default true; `max_snapshots`, 100; `max_file_bytes`, 10 MiB; `max_total_bytes`, 1 GiB).
+
+- `thread/checkpoint/list {threadId}` → `{checkpoints: [{turnId, timestamp, fileCount}], canUndo}`.
+- `thread/checkpoint/rewindFiles {threadId, turnId, dryRun}` puts the tracked files back as they were when
+  `turnId` started (a file first changed later gets its state before that change). `dryRun` only reports.
+  The response is `{canRewind, error?, filesChanged: [{path, change, insertions, deletions}], skipped: [{path,
+  reason}]}`; `change` is `restore`, `delete` or `recreate`, and a non-empty `skipped` (`symlink`,
+  `outside_roots`, `backup_missing`, `io`) means a partial restore. `canRewind: false` comes with `error`
+  (`turn_in_progress`, `restore_in_progress`, `checkpoint_not_found`, `disabled`, `timed_out`, ...) and
+  changes nothing. The conversation is not changed: call `thread/revert` afterwards for that.
+- `thread/checkpoint/undoRewind {threadId, dryRun}` takes the last applied rewind back, until the next turn.
+- `thread/checkpoint/restored {threadId, turnId?, filesChanged}` is sent after a rewind (or undo, without
+  `turnId`) changed files.
+
+While a rewind runs, `turn/start` and `thread/revert` on that thread are refused (`data.code` =
+`restore_in_progress`). A rewind writes only inside the thread's work folder and workspace roots and does not
+follow symbolic links.
+
 # Selected workspace routing
 
 The experimental `account/read.workspaceRouting` response field returns the selected ChatGPT workspace's `chatgptAccountId`, resolved HTTPS `backendOrigin`, and backend-provided `accountRoutingOverride`. The routing value is `us`, `us_cr`, or the explicit `NO_CONSTRAINT` value. API-only and signed-out accounts return `null` and do not need `accounts/check`.
