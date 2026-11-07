@@ -199,6 +199,9 @@ jobs:
             run -p codex-app-server-daemon --lib line_proxy
             run -p codex-app-server-transport --lib remote_allowed_roots
             run -p codex-core --lib unified_exec
+            run -p codex-core --lib file_tools
+            run -p codex-core --lib models_without_apply_patch_get_the_file_tools
+            run -p codex-core --test all suite::file_tools::
             run -p codex-core --test all suite::unified_exec -- \\
               --skip suite::unified_exec::unified_exec_enforces_glob_deny_read_policy \\
               --skip suite::unified_exec::unified_exec_network_denial_emits_failed_background_end_event \\

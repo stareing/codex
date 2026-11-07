@@ -1,6 +1,5 @@
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelMessages;
@@ -123,9 +122,9 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         default_reasoning_summary: ReasoningSummary::Auto,
         support_verbosity: false,
         default_verbosity: None,
-        // The base instructions tell every model to edit files with apply_patch; a
-        // third-party model on the chat wire API gets it as a one-argument function.
-        apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
+        // Unknown (third-party) models rarely write the apply_patch grammar correctly; without it
+        // they get the plain Read/Edit/Write tools (core/src/tools/handlers/file_tools.rs).
+        apply_patch_tool_type: None,
         web_search_tool_type: WebSearchToolType::Text,
         truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
         supports_image_detail_original: false,
