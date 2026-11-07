@@ -138,8 +138,10 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
-    # A cold cache (the cache is saved only when the job succeeds) took more than 150 min in run
-    # 42289835783, so a timed-out run never warmed it for the next one.
+    # A cold cache took more than 150 min in run 42289835783 and more than 300 min in 42316298652 /
+    # 42314213049. actions/cache saves only when the job succeeds, so a timed-out run never warmed it
+    # for the next one: the cache is now restored and saved in separate steps, and saved even when the
+    # tests time out (the test step stops at 270 min so the save still runs inside the job's 300).
     timeout-minutes: 300
     steps:
       - name: Free disk space
@@ -147,7 +149,8 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
           docker image prune -af >/dev/null
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - id: test-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/cargo-registry
@@ -173,6 +176,7 @@ jobs:
       # the upstream code in the production build container. The agent image runs codex with
       # danger-full-access inside its own gVisor container, so that sandbox is never used.
       - name: Test changed crates
+        timeout-minutes: 270
         run: |
           bash .github/tastyrice/in-rust-container.sh "export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
             failed=()
@@ -201,6 +205,15 @@ jobs:
               --skip suite::unified_exec_stdin_approval::strict_stdin_review_reaches_guardian_with_sandbox_prompts_disabled \\
               --skip suite::unified_exec_stdin_approval::stdin_reviews_retained_grants_after_turn_permissions_expire
             if ((\${#failed[@]})); then printf 'FAILED: %s\n' \"\${failed[@]}\"; exit 1; fi"
+      - name: Save the test cache (also after a failure or a timeout)
+        if: always() && steps.test-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/cargo-registry
+            ~/cargo-git
+            ~/target
+          key: test-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
 
   release:
     needs: [build, build-windows, test]
