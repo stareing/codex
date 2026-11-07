@@ -28,6 +28,7 @@ semver = { workspace = true }
 blake3 = { workspace = true }
 tokio = { workspace = true, features = [
     "fs",
+    "io-std",
     "io-util",
     "macros",
     "process",
