@@ -13,7 +13,7 @@ pub fn render_model_instructions(model_info: &ModelInfo) -> String {
             "Model has no instruction template; returning empty instructions."
         );
     }
-    template.unwrap_or_default().to_owned()
+    crate::brand::brand_instructions(template.unwrap_or_default())
 }
 
 #[cfg(test)]

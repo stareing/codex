@@ -1,3 +1,4 @@
+mod brand;
 mod compact;
 mod guardian_instructions;
 mod model_instructions;
@@ -9,6 +10,8 @@ mod review_exit;
 mod review_request;
 mod update_plan_instructions;
 
+pub use brand::AGENT_NAME;
+pub use brand::brand_instructions;
 pub use compact::SUMMARIZATION_PROMPT;
 pub use compact::SUMMARY_PREFIX;
 pub use guardian_instructions::GuardianClassifierInstructions;
