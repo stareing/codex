@@ -301,6 +301,34 @@ fn apply_read_acls(
     Ok(())
 }
 
+/// Ends a refresh run. Grants that failed only leave the sandbox with less access, so they are logged and the
+/// refresh succeeds; a protection (deny ACE) that failed would leave it with more, so the refresh fails.
+fn refresh_outcome(
+    grant_errors: &[String],
+    protect_errors: &[String],
+    log: &mut dyn Write,
+) -> Result<()> {
+    if !grant_errors.is_empty() {
+        log_line(
+            log,
+            &format!(
+                "setup refresh completed with warnings (sandbox keeps less access): {grant_errors:?}"
+            ),
+        )?;
+    }
+    if !protect_errors.is_empty() {
+        log_line(
+            log,
+            &format!("setup refresh could not protect paths: {protect_errors:?}"),
+        )?;
+        anyhow::bail!(
+            "setup refresh could not protect {} path(s)",
+            protect_errors.len()
+        );
+    }
+    Ok(())
+}
+
 fn read_mask_allows_or_log(
     root: &Path,
     psids: &[*mut c_void],
@@ -701,13 +729,13 @@ fn run_read_acl_only(payload: &Payload, log: &mut dyn Write) -> Result<()> {
         }
     }
     if !refresh_errors.is_empty() {
+        // A read grant that could not be added only leaves the sandbox with less access; it never widens it.
         log_line(
             log,
-            &format!("read ACL run completed with errors: {refresh_errors:?}"),
+            &format!(
+                "read ACL run completed with warnings (sandbox keeps less read access): {refresh_errors:?}"
+            ),
         )?;
-        if payload.refresh_only {
-            anyhow::bail!("read ACL run had errors");
-        }
     }
     log_line(log, "read ACL run completed")?;
     Ok(())
@@ -926,6 +954,8 @@ fn run_setup_full(payload: &Payload, log: &mut dyn Write, sbx_dir: &Path) -> Res
         string_from_sid_bytes(&sandbox_group_sid).map_err(anyhow::Error::msg)?;
 
     let mut refresh_errors: Vec<String> = Vec::new();
+    // Deny ACEs that could not be applied: the sandbox would keep access it must not have.
+    let mut protect_errors: Vec<String> = Vec::new();
 
     // Deny-read ACEs must be present before the sandboxed command starts. Apply
     // them synchronously here instead of delegating them to the background
@@ -1128,7 +1158,7 @@ fn run_setup_full(payload: &Payload, log: &mut dyn Write, sbx_dir: &Path) -> Res
                 }
                 Ok(false) => {}
                 Err(err) => {
-                    refresh_errors.push(format!("deny ACE failed on {}: {err}", path.display()));
+                    protect_errors.push(format!("deny ACE failed on {}: {err}", path.display()));
                     log_line(
                         log,
                         &format!("deny ACE failed on {}: {err}", path.display()),
@@ -1162,12 +1192,8 @@ fn run_setup_full(payload: &Payload, log: &mut dyn Write, sbx_dir: &Path) -> Res
             LocalFree(sandbox_group_psid as HLOCAL);
         }
     }
-    if refresh_only && !refresh_errors.is_empty() {
-        log_line(
-            log,
-            &format!("setup refresh completed with errors: {refresh_errors:?}"),
-        )?;
-        anyhow::bail!("setup refresh had errors");
+    if refresh_only {
+        refresh_outcome(&refresh_errors, &protect_errors, log)?;
     }
     log_note("setup binary completed", Some(sbx_dir));
     Ok(())
@@ -1180,6 +1206,26 @@ mod acl_tests;
 #[cfg(test)]
 #[path = "setup_provisioning/registered_tests.rs"]
 mod registered_tests;
+
+#[cfg(test)]
+mod refresh_outcome_tests {
+    use super::refresh_outcome;
+
+    #[test]
+    fn grant_failures_are_warnings() {
+        let mut log = Vec::new();
+        let grants = vec!["write ACE failed on C:\\Temp: 5".to_string()];
+        assert!(refresh_outcome(&grants, &[], &mut log).is_ok());
+        assert!(String::from_utf8_lossy(&log).contains("warnings"));
+        assert!(refresh_outcome(&[], &[], &mut Vec::new()).is_ok());
+    }
+
+    #[test]
+    fn protect_failures_fail_the_refresh() {
+        let protects = vec!["deny ACE failed on C:\\w\\.git: 5".to_string()];
+        assert!(refresh_outcome(&[], &protects, &mut Vec::new()).is_err());
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -274,7 +274,7 @@ async fn run_foreground_remote_control(
     {
         println!("{CONTROL_SOCKET_PREFIX}{}", socket.as_path().display());
     }
-    if let Err(error) = print_foreground_ready_output(&summary, json) {
+    if let Err(error) = print_ready_output(&summary, json, announce_socket.is_some()) {
         abort_foreground_app_server(app_server_task).await;
         stop_signal_task.abort();
         return Err(error);
@@ -283,6 +283,27 @@ async fn run_foreground_remote_control(
     let result = wait_for_foreground_app_server(app_server_task, stop_rx).await;
     stop_signal_task.abort();
     result
+}
+
+/// With a sessions file the server also carries the desktop app's own sessions, and "disabled" only means no
+/// session is shared yet (the app flips sharing on later), so it keeps serving instead of exiting.
+fn print_ready_output(
+    summary: &AppServerRemoteControlReadyStatus,
+    json: bool,
+    serves_sessions_file: bool,
+) -> anyhow::Result<()> {
+    if serves_sessions_file && summary.status == RemoteControlConnectionStatus::Disabled && !json {
+        println!("{}", nothing_shared_message(summary));
+        return Ok(());
+    }
+    print_foreground_ready_output(summary, json)
+}
+
+fn nothing_shared_message(summary: &AppServerRemoteControlReadyStatus) -> String {
+    format!(
+        "No session on {} is shared for remote control yet; serving local sessions.",
+        summary.server_name
+    )
 }
 
 fn foreground_stop_signal() -> (watch::Receiver<bool>, JoinHandle<()>) {
@@ -707,6 +728,18 @@ mod tests {
             environment_id: "env_test".to_string(),
             expires_at: 1_700_000_000,
         }
+    }
+
+    #[test]
+    fn a_sessions_file_server_keeps_serving_while_nothing_is_shared() {
+        let disabled = remote_control_status(RemoteControlConnectionStatus::Disabled);
+        assert!(print_ready_output(&disabled, false, true).is_ok());
+        assert_eq!(
+            nothing_shared_message(&disabled),
+            "No session on owen-mbp is shared for remote control yet; serving local sessions."
+        );
+        assert!(print_ready_output(&disabled, false, false).is_err());
+        assert!(print_ready_output(&disabled, true, true).is_err());
     }
 
     #[test]
