@@ -307,18 +307,17 @@ fn check_model_configured(required: bool, source: ProviderSource) -> Result<(), 
     }
 }
 
-/// For the site provider without a `model_catalog_json`: the catalog to show until (or instead
-/// of) the relay's own list — just the suggested model, never the bundled upstream presets.
+/// For a provider that names its own `model_catalog_url` (the site provider, or the site's model
+/// gateway inside a cloud sandbox) and has no `model_catalog_json`: the catalog to show until (or
+/// instead of) the provider's own list — just the suggested model, never the bundled upstream
+/// presets, which that provider does not serve.
 pub fn own_catalog_fallback(
-    provider_id: &str,
+    _provider_id: &str,
     provider: &ModelProviderInfo,
     model: Option<&str>,
     configured_catalog: Option<&ModelsResponse>,
 ) -> Option<ModelsResponse> {
-    if provider_id != SITE_PROVIDER_ID
-        || provider.model_catalog_url.is_none()
-        || configured_catalog.is_some()
-    {
+    if provider.model_catalog_url.is_none() || configured_catalog.is_some() {
         return None;
     }
     let models = model
