@@ -78,7 +78,9 @@ async fn rewind_files_to_the_start_of_a_turn_and_undo_it() -> Result<()> {
     let server = create_mock_responses_server_sequence_unchecked(responses).await;
     MockResponsesConfig::new(&server.uri())
         .with_approval_policy("never")
-        .with_sandbox_mode("workspace-write")
+        // Checkpoints, not sandboxing: CI containers cannot start the Linux sandbox, so a
+        // sandboxed patch would never apply there.
+        .with_sandbox_mode("danger-full-access")
         .disable_feature(Feature::ShellSnapshot)
         .write(&codex_home)?;
 
