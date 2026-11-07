@@ -169,6 +169,7 @@ pub(crate) struct MessageProcessor {
     windows_sandbox_processor: WindowsSandboxRequestProcessor,
     request_serialization_queues: RequestSerializationQueues,
     remote_roots: crate::remote_roots::RemoteRoots,
+    local_roots: crate::local_roots::LocalRoots,
     remote_threads: Arc<crate::remote_threads::RemoteThreads>,
 }
 
@@ -268,6 +269,8 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) plugin_startup_tasks: Option<PluginStartupConfig>,
     /// Folders remote-control requests may use (see `remote_roots`).
     pub(crate) remote_roots: crate::remote_roots::RemoteRoots,
+    /// Folders local (stdio, websocket) requests may use, when the launcher named them (see `local_roots`).
+    pub(crate) local_roots: crate::local_roots::LocalRoots,
     /// Sessions remote-control requests may reach (see `remote_threads`).
     pub(crate) remote_threads: Arc<crate::remote_threads::RemoteThreads>,
 }
@@ -296,6 +299,7 @@ impl MessageProcessor {
             remote_control_handle,
             plugin_startup_tasks,
             remote_roots,
+            local_roots,
             remote_threads,
         } = args;
         // Startup credential reads must not open a browser before initialize selects the policy.
@@ -621,6 +625,7 @@ impl MessageProcessor {
             windows_sandbox_processor,
             request_serialization_queues,
             remote_roots,
+            local_roots,
             remote_threads,
         }
     }
@@ -971,15 +976,19 @@ impl MessageProcessor {
         .await
     }
 
-    /// Refuses a remote-control request that would work outside the allowed folders.
-    async fn check_remote_roots(&self, request: &ClientRequest) -> Result<(), JSONRPCErrorError> {
-        let roots = &self.remote_roots;
+    /// Refuses a request that would work outside the folders `roots` allows (remote control, or a
+    /// local connection held to the launcher's folders).
+    async fn check_roots(
+        &self,
+        roots: &crate::remote_roots::RemoteRoots,
+        request: &ClientRequest,
+    ) -> Result<(), JSONRPCErrorError> {
         if !roots.is_restricted() {
             return Ok(());
         }
         let scope = crate::remote_roots::request_scope(request);
         if let Some(reason) = scope.refused {
-            return Err(invalid_request(reason.to_string()));
+            return Err(invalid_request(roots.reword(reason)));
         }
         for path in &scope.paths {
             roots.check(path).map_err(invalid_request)?;
@@ -1023,7 +1032,11 @@ impl MessageProcessor {
                 .check(&codex_request)
                 .map_err(invalid_request)?;
             // Boxed: the thread lookup would otherwise grow every request future.
-            Box::pin(self.check_remote_roots(&codex_request)).await?;
+            Box::pin(self.check_roots(&self.remote_roots, &codex_request)).await?;
+        } else if session.origin != crate::transport::ConnectionOrigin::InProcess
+            && let Some(roots) = self.local_roots.current()
+        {
+            Box::pin(self.check_roots(&roots, &codex_request)).await?;
         }
         let connection_id = connection_request_id.connection_id;
         self.initialize_processor.track_initialized_request(

@@ -275,3 +275,74 @@ async fn local_clients_are_not_limited_by_the_shared_sessions_body() -> Result<(
     h.shutdown().await;
     Ok(())
 }
+
+#[test]
+fn local_requests_follow_the_launchers_roots_file() -> Result<()> {
+    with_stack(local_requests_follow_the_launchers_roots_file_body())
+}
+
+async fn local_requests_follow_the_launchers_roots_file_body() -> Result<()> {
+    let folders = folders();
+    let file = folders.allowed.parent().unwrap().join("roots.json");
+    std::fs::write(&file, serde_json::to_vec(&[&folders.allowed])?)?;
+    for origin in [ConnectionOrigin::Stdio, ConnectionOrigin::WebSocket] {
+        let mut h = Harness::new_with_local_roots(origin, file.clone()).await?;
+        h.initialize("local", /*opt_in*/ true).await;
+        h.send(
+            1,
+            "fs/readFile",
+            json!({"path": folders.outside.join("out.txt")}),
+        )
+        .await;
+        let error = refusal(h.response().await, 1);
+        assert_eq!(error.code, -32600);
+        assert!(
+            error
+                .message
+                .starts_with("this session may only use the folders allowed in the app"),
+            "{origin:?}: {}",
+            error.message
+        );
+        h.send(
+            2,
+            "fs/readFile",
+            json!({"path": folders.allowed.join("in.txt")}),
+        )
+        .await;
+        assert!(
+            matches!(h.response().await, OutgoingMessage::Response(_)),
+            "{origin:?}: inside the allowed folder"
+        );
+        h.shutdown().await;
+    }
+
+    // A folder the launcher allows later counts without a restart.
+    let mut h = Harness::new_with_local_roots(ConnectionOrigin::Stdio, file.clone()).await?;
+    h.initialize("local", /*opt_in*/ true).await;
+    std::fs::write(
+        &file,
+        serde_json::to_vec(&[&folders.allowed, &folders.outside])?,
+    )?;
+    h.send(
+        3,
+        "fs/readFile",
+        json!({"path": folders.outside.join("out.txt")}),
+    )
+    .await;
+    assert!(matches!(h.response().await, OutgoingMessage::Response(_)));
+    h.shutdown().await;
+
+    // In-process callers are the server's own code: never checked.
+    std::fs::write(&file, "[]")?;
+    let mut h = Harness::new_with_local_roots(ConnectionOrigin::InProcess, file.clone()).await?;
+    h.initialize("local", /*opt_in*/ true).await;
+    h.send(
+        4,
+        "fs/readFile",
+        json!({"path": folders.outside.join("out.txt")}),
+    )
+    .await;
+    assert!(matches!(h.response().await, OutgoingMessage::Response(_)));
+    h.shutdown().await;
+    Ok(())
+}

@@ -136,6 +136,31 @@ impl Harness {
         remote_roots: Option<Vec<std::path::PathBuf>>,
         sessions_file: Option<std::path::PathBuf>,
     ) -> Result<Self> {
+        Self::build(
+            origin,
+            supported,
+            remote_roots,
+            sessions_file,
+            /*local_roots_file*/ None,
+        )
+        .await
+    }
+
+    /// `local_roots_file`: the launcher's roots file for local connections (`local_roots`).
+    pub(super) async fn new_with_local_roots(
+        origin: ConnectionOrigin,
+        local_roots_file: std::path::PathBuf,
+    ) -> Result<Self> {
+        Self::build(origin, || true, None, None, Some(local_roots_file)).await
+    }
+
+    async fn build(
+        origin: ConnectionOrigin,
+        supported: fn() -> bool,
+        remote_roots: Option<Vec<std::path::PathBuf>>,
+        sessions_file: Option<std::path::PathBuf>,
+        local_roots_file: Option<std::path::PathBuf>,
+    ) -> Result<Self> {
         let home = tempfile::tempdir()?;
         write_auth(home.path(), "first")?;
         let config = Arc::new(
@@ -175,6 +200,11 @@ impl Harness {
             ),
             None => crate::remote_roots::RemoteRoots::unrestricted(),
         };
+        let local_roots = crate::local_roots::LocalRoots::new(
+            local_roots_file,
+            config.cwd.to_path_buf(),
+            config.codex_home.to_path_buf(),
+        );
         let (sender, messages) = mpsc::channel(/*buffer*/ 16);
         let outgoing = Arc::new(OutgoingMessageSender::new(
             sender,
@@ -206,6 +236,7 @@ impl Harness {
             remote_control_handle: None,
             plugin_startup_tasks: None,
             remote_roots,
+            local_roots,
             remote_threads: Arc::new(crate::remote_threads::RemoteThreads::new(sessions_file)),
         }));
         Ok(Self {

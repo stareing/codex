@@ -18,6 +18,10 @@ use std::path::PathBuf;
 
 /// Path list (`PATH`-style separator) of the folders remote-control requests may touch.
 pub const SITE_RELAY_ALLOWED_ROOTS_ENV_VAR: &str = "SITE_RELAY_ALLOWED_ROOTS";
+/// Path of a JSON array of folders (same format as [`REMOTE_ALLOWED_ROOTS_FILE`]) that local
+/// connections (stdio, websocket) are held to as well; the launcher keeps the file current and the
+/// app-server re-reads it when it changes (`app-server/src/local_roots.rs`). Unset: unchecked.
+pub const SITE_LOCAL_ALLOWED_ROOTS_FILE_ENV_VAR: &str = "SITE_LOCAL_ALLOWED_ROOTS_FILE";
 /// JSON array of absolute folder paths, in the daemon state directory.
 pub const REMOTE_ALLOWED_ROOTS_FILE: &str = "remote-control-allowed-roots.json";
 const MAX_ROOTS_FILE_BYTES: u64 = 64 * 1024;
@@ -37,22 +41,25 @@ pub fn decode_allowed_roots(value: &OsStr) -> Vec<PathBuf> {
 
 /// Reads the daemon's saved roots; `Ok(None)` when none were saved.
 pub fn read_allowed_roots_file(state_dir: &Path) -> io::Result<Option<Vec<PathBuf>>> {
+    match read_roots_json(&state_dir.join(REMOTE_ALLOWED_ROOTS_FILE)) {
+        Ok(roots) => Ok(Some(roots)),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// Reads a JSON list of folders (at most 64 KiB).
+pub fn read_roots_json(path: &Path) -> io::Result<Vec<PathBuf>> {
     use std::io::Read;
-    let path = state_dir.join(REMOTE_ALLOWED_ROOTS_FILE);
-    let file = match std::fs::File::open(&path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err),
-    };
+    let file = std::fs::File::open(path)?;
     let mut raw = String::new();
     file.take(MAX_ROOTS_FILE_BYTES).read_to_string(&mut raw)?;
-    let roots: Vec<PathBuf> = serde_json::from_str(&raw).map_err(|err| {
+    serde_json::from_str(&raw).map_err(|err| {
         io::Error::new(
             ErrorKind::InvalidData,
             format!("{} is not a list of folders: {err}", path.display()),
         )
-    })?;
-    Ok(Some(roots))
+    })
 }
 
 /// Saves the daemon's roots; returns whether they differ from what was saved before.
