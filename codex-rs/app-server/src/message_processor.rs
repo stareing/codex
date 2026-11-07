@@ -169,6 +169,7 @@ pub(crate) struct MessageProcessor {
     windows_sandbox_processor: WindowsSandboxRequestProcessor,
     request_serialization_queues: RequestSerializationQueues,
     remote_roots: crate::remote_roots::RemoteRoots,
+    remote_threads: Arc<crate::remote_threads::RemoteThreads>,
 }
 
 #[derive(Debug)]
@@ -267,6 +268,8 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) plugin_startup_tasks: Option<PluginStartupConfig>,
     /// Folders remote-control requests may use (see `remote_roots`).
     pub(crate) remote_roots: crate::remote_roots::RemoteRoots,
+    /// Sessions remote-control requests may reach (see `remote_threads`).
+    pub(crate) remote_threads: Arc<crate::remote_threads::RemoteThreads>,
 }
 
 impl MessageProcessor {
@@ -293,6 +296,7 @@ impl MessageProcessor {
             remote_control_handle,
             plugin_startup_tasks,
             remote_roots,
+            remote_threads,
         } = args;
         // Startup credential reads must not open a browser before initialize selects the policy.
         let gateway_login_control =
@@ -617,6 +621,7 @@ impl MessageProcessor {
             windows_sandbox_processor,
             request_serialization_queues,
             remote_roots,
+            remote_threads,
         }
     }
 
@@ -1013,6 +1018,10 @@ impl MessageProcessor {
             return Err(invalid_request(experimental_required_message(reason)));
         }
         if session.origin == crate::transport::ConnectionOrigin::RemoteControl {
+            // Sessions first: an unshared session is refused before its folder is looked up.
+            self.remote_threads
+                .check(&codex_request)
+                .map_err(invalid_request)?;
             // Boxed: the thread lookup would otherwise grow every request future.
             Box::pin(self.check_remote_roots(&codex_request)).await?;
         }
@@ -1509,7 +1518,12 @@ impl MessageProcessor {
                     .await
             }
             ClientRequest::ThreadList { params, .. } => {
-                self.thread_processor.thread_list(params).await
+                let listed = self.thread_processor.thread_list(params).await;
+                if session.origin == crate::transport::ConnectionOrigin::RemoteControl {
+                    listed.map(|payload| payload.map(|payload| self.remote_threads.filter(payload)))
+                } else {
+                    listed
+                }
             }
             ClientRequest::ProjectList { params, .. } => {
                 self.project_processor.project_list(params).await

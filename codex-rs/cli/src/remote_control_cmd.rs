@@ -42,6 +42,12 @@ pub(crate) struct RemoteControlCommand {
     #[arg(long = "no-host-info", global = true)]
     no_host_info: bool,
 
+    /// File naming the sessions remote control may reach and whether to be on the relay
+    /// (`{"relay":true,"mode":"listed","threadIds":[…]}`, re-read every second; written by the desktop app).
+    /// Without it, every session is reachable.
+    #[arg(long = "sessions-file", value_name = "PATH")]
+    sessions_file: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     subcommand: Option<RemoteControlSubcommand>,
 }
@@ -134,6 +140,7 @@ pub(crate) async fn run(
                 arg0_paths,
                 root_config_overrides,
                 allowed_roots,
+                command.sessions_file,
             )
             .await?;
         }
@@ -193,6 +200,7 @@ async fn run_foreground_remote_control(
     arg0_paths: Arg0DispatchPaths,
     root_config_overrides: CliConfigOverrides,
     allowed_roots: Vec<std::path::PathBuf>,
+    sessions_file: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     let socket_dir = tempfile::Builder::new()
         .prefix("codex-rc-")
@@ -210,6 +218,7 @@ async fn run_foreground_remote_control(
         remote_control_startup_mode: codex_app_server::RemoteControlStartupMode::EnabledEphemeral,
         install_shutdown_signal_handler: false,
         remote_control_allowed_roots: Some(allowed_roots),
+        remote_control_sessions_file: sessions_file,
         ..Default::default()
     };
     let (stop_rx, stop_signal_task) = foreground_stop_signal();

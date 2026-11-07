@@ -180,3 +180,98 @@ async fn local_connections_ignore_the_remote_allow_list_body() -> Result<()> {
     h.shutdown().await;
     Ok(())
 }
+
+#[test]
+fn remote_clients_reach_only_the_shared_sessions() -> Result<()> {
+    with_stack(remote_clients_reach_only_the_shared_sessions_body())
+}
+
+async fn remote_clients_reach_only_the_shared_sessions_body() -> Result<()> {
+    let folders = folders();
+    let sessions = folders.allowed.join("remote-threads.json");
+    std::fs::write(
+        &sessions,
+        r#"{"relay":true,"mode":"listed","threadIds":["t1"]}"#,
+    )?;
+    let mut h = Harness::new_with_remote_policy(
+        ConnectionOrigin::RemoteControl,
+        || true,
+        Some(vec![folders.allowed.clone()]),
+        Some(sessions.clone()),
+    )
+    .await?;
+    h.initialize("remote", /*opt_in*/ true).await;
+
+    h.send(1, "thread/resume", json!({"threadId": "t2"})).await;
+    let error = refusal(h.response().await, 1);
+    assert_eq!(error.code, -32600);
+    assert!(error.message.contains("not shared"), "{}", error.message);
+
+    h.send(2, "thread/start", json!({"cwd": folders.allowed}))
+        .await;
+    assert!(
+        refusal(h.response().await, 2)
+            .message
+            .contains("only the sessions")
+    );
+
+    h.send(3, "remoteControl/disable", json!({})).await;
+    assert_eq!(refusal(h.response().await, 3).code, -32600);
+
+    // Reading a file in an allowed folder needs no session.
+    h.send(
+        4,
+        "fs/readFile",
+        json!({"path": folders.allowed.join("in.txt")}),
+    )
+    .await;
+    let OutgoingMessage::Response(_) = h.response().await else {
+        panic!("reading inside the allowed folder should still work")
+    };
+
+    // The file is read again: sharing everything lets the start through the session check (it then fails or
+    // succeeds on its own, but not with the sharing refusal).
+    std::fs::write(&sessions, r#"{"relay":true,"mode":"all"}"#)?;
+    h.send(5, "thread/resume", json!({"threadId": "t2"})).await;
+    if let OutgoingMessage::Error(error) = h.response().await {
+        assert!(
+            !error.error.message.contains("not shared"),
+            "{}",
+            error.error.message
+        );
+    }
+    h.shutdown().await;
+    Ok(())
+}
+
+#[test]
+fn local_clients_are_not_limited_by_the_shared_sessions() -> Result<()> {
+    with_stack(local_clients_are_not_limited_by_the_shared_sessions_body())
+}
+
+async fn local_clients_are_not_limited_by_the_shared_sessions_body() -> Result<()> {
+    let folders = folders();
+    let sessions = folders.allowed.join("remote-threads.json");
+    std::fs::write(
+        &sessions,
+        r#"{"relay":false,"mode":"listed","threadIds":[]}"#,
+    )?;
+    let mut h = Harness::new_with_remote_policy(
+        ConnectionOrigin::Stdio,
+        || true,
+        /*remote_roots*/ None,
+        Some(sessions),
+    )
+    .await?;
+    h.initialize("local", /*opt_in*/ true).await;
+    h.send(1, "thread/resume", json!({"threadId": "t2"})).await;
+    if let OutgoingMessage::Error(error) = h.response().await {
+        assert!(
+            !error.error.message.contains("not shared"),
+            "{}",
+            error.error.message
+        );
+    }
+    h.shutdown().await;
+    Ok(())
+}

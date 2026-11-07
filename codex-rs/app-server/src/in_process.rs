@@ -516,6 +516,7 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                 remote_control_handle: None,
                 plugin_startup_tasks: Some(PluginStartupConfig::Current),
                 remote_roots: crate::remote_roots::RemoteRoots::unrestricted(),
+                remote_threads: Arc::new(crate::remote_threads::RemoteThreads::off()),
             }));
             let mut thread_created_rx = processor.thread_created_receiver();
             let session = Arc::new(ConnectionSessionState::new(

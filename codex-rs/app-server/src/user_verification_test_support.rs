@@ -126,6 +126,16 @@ impl Harness {
         supported: fn() -> bool,
         remote_roots: Option<Vec<std::path::PathBuf>>,
     ) -> Result<Self> {
+        Self::new_with_remote_policy(origin, supported, remote_roots, /*sessions_file*/ None).await
+    }
+
+    /// Also `sessions_file`: the shared-sessions file (`remote_threads`; `None` = every session).
+    pub(super) async fn new_with_remote_policy(
+        origin: ConnectionOrigin,
+        supported: fn() -> bool,
+        remote_roots: Option<Vec<std::path::PathBuf>>,
+        sessions_file: Option<std::path::PathBuf>,
+    ) -> Result<Self> {
         let home = tempfile::tempdir()?;
         write_auth(home.path(), "first")?;
         let config = Arc::new(
@@ -196,6 +206,7 @@ impl Harness {
             remote_control_handle: None,
             plugin_startup_tasks: None,
             remote_roots,
+            remote_threads: Arc::new(crate::remote_threads::RemoteThreads::new(sessions_file)),
         }));
         Ok(Self {
             processor,
