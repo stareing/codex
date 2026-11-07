@@ -1037,6 +1037,8 @@ impl MessageProcessor {
             | ClientRequest::ThreadFork { .. }
             | ClientRequest::ThreadResume { .. }
             | ClientRequest::ThreadRevert { .. }
+            | ClientRequest::ThreadCheckpointRewindFiles { .. }
+            | ClientRequest::ThreadCheckpointUndoRewind { .. }
             | ClientRequest::ThreadSettingsUpdate { .. }
             | ClientRequest::TurnSettingsUpdate { .. }
             | ClientRequest::ThreadDelete { .. }
