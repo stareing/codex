@@ -511,6 +511,10 @@ pub struct ConfigToml {
     #[serde(default)]
     pub ghost_snapshot: Option<GhostSnapshotToml>,
 
+    /// File checkpoints per turn: the agent's file edits can be rewound to how they were when a turn started.
+    #[serde(default)]
+    pub checkpoint: Option<CheckpointToml>,
+
     /// Markers used to detect the project root when searching parent
     /// directories for `.codex` folders. Defaults to [".git"] when unset.
     #[serde(default)]
@@ -767,6 +771,19 @@ pub struct GhostSnapshotToml {
     pub ignore_large_untracked_dirs: Option<i64>,
     /// Legacy no-op setting retained for compatibility.
     pub disable_warnings: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CheckpointToml {
+    /// Record checkpoints (default true).
+    pub enabled: Option<bool>,
+    /// Checkpoints kept per thread (default 100, at least 1).
+    pub max_snapshots: Option<usize>,
+    /// Files larger than this many bytes are tracked without a copy (default 10 MiB).
+    pub max_file_bytes: Option<u64>,
+    /// Bytes one thread's backups may take (default 1 GiB, at least `max_file_bytes`).
+    pub max_total_bytes: Option<u64>,
 }
 
 /// Apply the executor's sandbox availability to an already selected sandbox mode.

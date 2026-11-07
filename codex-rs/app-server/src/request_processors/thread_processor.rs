@@ -3,6 +3,9 @@ mod daemon_continuation;
 
 #[path = "daemon_snapshot.rs"]
 mod daemon_snapshot;
+#[path = "thread_checkpoint.rs"]
+mod thread_checkpoint;
+pub(crate) use thread_checkpoint::ensure_no_restore;
 
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
@@ -2136,6 +2139,7 @@ impl ThreadRequestProcessor {
         } = params;
         let (thread_id, thread) = self.load_thread(&thread_id).await?;
         ensure_direct_input_allowed(thread.as_ref()).await?;
+        ensure_no_restore(thread.as_ref(), thread_id).await?;
         let config_snapshot = thread.config_snapshot().await;
         if config_snapshot.ephemeral {
             return Err(invalid_request(

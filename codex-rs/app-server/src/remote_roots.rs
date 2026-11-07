@@ -376,6 +376,14 @@ pub(crate) fn request_scope(request: &ClientRequest) -> RequestScope {
         ClientRequest::ThreadShellCommand { params, .. } => RequestScope::thread(&params.thread_id),
         ClientRequest::ThreadCompactStart { params, .. } => RequestScope::thread(&params.thread_id),
         ClientRequest::ThreadQueueStart { params, .. } => RequestScope::thread(&params.thread_id),
+        // A rewind writes in the thread's folders: the thread must be one --allow covers.
+        ClientRequest::ThreadCheckpointList { params, .. } => RequestScope::thread(&params.thread_id),
+        ClientRequest::ThreadCheckpointRewindFiles { params, .. } => {
+            RequestScope::thread(&params.thread_id)
+        }
+        ClientRequest::ThreadCheckpointUndoRewind { params, .. } => {
+            RequestScope::thread(&params.thread_id)
+        }
         ClientRequest::ThreadRealtimeStart { params, .. } => {
             RequestScope::thread(&params.thread_id)
         }

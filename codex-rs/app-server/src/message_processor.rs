@@ -1507,6 +1507,19 @@ impl MessageProcessor {
                     .thread_background_terminals_terminate(params)
                     .await
             }
+            ClientRequest::ThreadCheckpointList { params, .. } => {
+                self.thread_processor.thread_checkpoint_list(params).await
+            }
+            ClientRequest::ThreadCheckpointRewindFiles { params, .. } => {
+                self.thread_processor
+                    .thread_checkpoint_rewind_files(params)
+                    .await
+            }
+            ClientRequest::ThreadCheckpointUndoRewind { params, .. } => {
+                self.thread_processor
+                    .thread_checkpoint_undo_rewind(params)
+                    .await
+            }
             ClientRequest::ThreadRevert { params, .. } => {
                 self.thread_processor
                     .thread_revert(

@@ -1285,6 +1285,124 @@ pub struct ThreadRevertResponse {
     pub items_backwards_cursor: Option<String>,
 }
 
+/// A thread's file checkpoints: one per turn, the agent-tracked files as they were when the turn started.
+///
+/// Only files the agent changed through patches (Edit/Write/apply_patch) are tracked; changes made by shell
+/// commands or outside the agent are not.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCheckpointListParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCheckpoint {
+    /// The turn whose start this checkpoint records (`Turn.id`).
+    pub turn_id: String,
+    /// When it was taken, in milliseconds since the Unix epoch.
+    pub timestamp: i64,
+    /// Files tracked at that point.
+    pub file_count: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCheckpointListResponse {
+    /// Oldest first; at most `checkpoint.max_snapshots`.
+    pub checkpoints: Vec<ThreadCheckpoint>,
+    /// `thread/checkpoint/undoRewind` has a rewind to take back.
+    pub can_undo: bool,
+}
+
+/// Put the tracked files back as they were when `turn_id` started (the conversation is not changed: use
+/// `thread/revert` for that, after this succeeded).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCheckpointRewindFilesParams {
+    pub thread_id: String,
+    pub turn_id: String,
+    /// Only report what would change.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Take the last applied rewind back.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCheckpointUndoRewindParams {
+    pub thread_id: String,
+    /// Only report what would change.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub enum ThreadCheckpointChange {
+    /// The file gets its earlier content back.
+    Restore,
+    /// The file did not exist then and is deleted.
+    Delete,
+    /// The file is gone now and is written again.
+    Recreate,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCheckpointFileChange {
+    pub path: String,
+    pub change: ThreadCheckpointChange,
+    /// Lines added by the rewind.
+    pub insertions: u64,
+    /// Lines removed by the rewind.
+    pub deletions: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCheckpointSkipped {
+    pub path: String,
+    /// `symlink`, `outside_roots`, `backup_missing` or `io`.
+    pub reason: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCheckpointRewindResponse {
+    /// `false`: nothing was changed, `error` says why.
+    pub can_rewind: bool,
+    /// `turn_in_progress`, `restore_in_progress`, `checkpoint_not_found`, `nothing_to_undo`, `disabled`,
+    /// `timed_out`, `no_snapshot`, `checkpoint_io` or `checkpoint_corrupt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+    pub files_changed: Vec<ThreadCheckpointFileChange>,
+    /// Files left as they are; non-empty means a partial restore.
+    pub skipped: Vec<ThreadCheckpointSkipped>,
+}
+
+/// Files of a thread were rewound (or a rewind was undone, `turnId` absent).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadCheckpointRestoredNotification {
+    pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub turn_id: Option<String>,
+    pub files_changed: Vec<ThreadCheckpointFileChange>,
+}
+
 /// Parameters for listing independently persisted thread sections.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

@@ -4444,6 +4444,85 @@
       ],
       "type": "object"
     },
+    "ThreadCheckpointChange": {
+      "oneOf": [
+        {
+          "description": "The file gets its earlier content back.",
+          "enum": [
+            "restore"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The file did not exist then and is deleted.",
+          "enum": [
+            "delete"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The file is gone now and is written again.",
+          "enum": [
+            "recreate"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ThreadCheckpointFileChange": {
+      "properties": {
+        "change": {
+          "$ref": "#/definitions/ThreadCheckpointChange"
+        },
+        "deletions": {
+          "description": "Lines removed by the rewind.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "description": "Lines added by the rewind.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "change",
+        "deletions",
+        "insertions",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ThreadCheckpointRestoredNotification": {
+      "description": "Files of a thread were rewound (or a rewind was undone, `turnId` absent).",
+      "properties": {
+        "filesChanged": {
+          "items": {
+            "$ref": "#/definitions/ThreadCheckpointFileChange"
+          },
+          "type": "array"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "filesChanged",
+        "threadId"
+      ],
+      "type": "object"
+    },
     "ThreadClosedNotification": {
       "properties": {
         "threadId": {
@@ -7063,6 +7142,26 @@
         "params"
       ],
       "title": "Thread/revertedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/checkpoint/restored"
+          ],
+          "title": "Thread/checkpoint/restoredNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadCheckpointRestoredNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Thread/checkpoint/restoredNotification",
       "type": "object"
     },
     {

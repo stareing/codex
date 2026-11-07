@@ -579,6 +579,15 @@ pub(crate) async fn execute_verified_patch(
     );
     emitter.begin(event_ctx).await;
 
+    // Before the patch (and its approval): a declined patch leaves a backup of an unchanged file, which is harmless.
+    crate::checkpoints::track_patch(
+        &tool_ctx.session,
+        &tool_ctx.step_context.turn.config,
+        &turn_environment,
+        &file_paths,
+    )
+    .await;
+
     let request = ApplyPatchRequest {
         turn_environment,
         action: apply.action,
