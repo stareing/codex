@@ -139,6 +139,15 @@ fn dangerous_command_match_for_exec(
             dangerous_command_match_with_depth(&command[1..], wrapper_depth + 1, platform)
         }
 
+        // An output filter (`rtk <cmd>`, from a command-rewriting hook) runs <cmd>.
+        Some("rtk") => {
+            let wrapped = super::command_filter::unwrap_output_filter(command);
+            // `rtk` alone (or `rtk proxy`) wraps nothing.
+            (wrapped.len() < command.len())
+                .then(|| dangerous_command_match_with_depth(wrapped, wrapper_depth + 1, platform))
+                .flatten()
+        }
+
         // Skip environment assignments before checking the command run by env.
         Some("env") => dangerous_command_match_for_env(command, wrapper_depth, platform),
 
@@ -219,6 +228,25 @@ mod tests {
             dangerous_command_match(&vec_str(&["rm", "-rf", "/"])),
             Some(DangerousCommandMatch::ForcedRm)
         );
+    }
+
+    #[test]
+    fn an_output_filter_does_not_hide_the_command() {
+        assert_eq!(
+            dangerous_command_match(&vec_str(&["rtk", "rm", "-rf", "build"])),
+            Some(DangerousCommandMatch::ForcedRm)
+        );
+        assert_eq!(
+            dangerous_command_match(&vec_str(&["bash", "-lc", "rtk proxy rm -rf build"])),
+            Some(DangerousCommandMatch::ForcedRm)
+        );
+        assert_eq!(
+            dangerous_command_match(&vec_str(&["rtk", "git", "status"])),
+            None
+        );
+        // Wrapping nothing is not a wrapper loop.
+        assert_eq!(dangerous_command_match(&vec_str(&["rtk"])), None);
+        assert_eq!(dangerous_command_match(&vec_str(&["rtk", "proxy"])), None);
     }
 
     #[test]

@@ -987,6 +987,60 @@ prefix_rule(
     .await;
 }
 
+/// A hook that rewrites `git push` into `rtk git push` (an output filter) must not step around a rule
+/// for `git push`, and the amendment it offers is for the wrapped command.
+#[tokio::test]
+async fn rules_see_the_command_an_output_filter_wraps() {
+    let forbidden = exec_approval_requirement_for_command(ExecApprovalRequirementScenario {
+        policy_src: Some(
+            r#"prefix_rule(pattern=["git", "push"], decision="forbidden")"#.to_string(),
+        ),
+        command: vec_str(&["bash", "-lc", "rtk git push origin main"]),
+        approval_policy: AskForApproval::OnRequest,
+        permission_profile: PermissionProfile::Disabled,
+        sandbox_permissions: SandboxPermissions::UseDefault,
+        prefix_rule: None,
+    })
+    .await;
+    assert!(
+        matches!(forbidden, ExecApprovalRequirement::Forbidden { .. }),
+        "{forbidden:?}"
+    );
+
+    let allowed = exec_approval_requirement_for_command(ExecApprovalRequirementScenario {
+        policy_src: Some(r#"prefix_rule(pattern=["git", "status"], decision="allow")"#.to_string()),
+        command: vec_str(&["rtk", "git", "status"]),
+        approval_policy: AskForApproval::UnlessTrusted,
+        permission_profile: PermissionProfile::workspace_write(),
+        sandbox_permissions: SandboxPermissions::UseDefault,
+        prefix_rule: None,
+    })
+    .await;
+    assert!(
+        matches!(allowed, ExecApprovalRequirement::Skip { .. }),
+        "{allowed:?}"
+    );
+
+    let unmatched = exec_approval_requirement_for_command(ExecApprovalRequirementScenario {
+        policy_src: None,
+        command: vec_str(&["rtk", "git", "status"]),
+        approval_policy: AskForApproval::UnlessTrusted,
+        permission_profile: PermissionProfile::workspace_write(),
+        sandbox_permissions: SandboxPermissions::UseDefault,
+        prefix_rule: None,
+    })
+    .await;
+    assert_eq!(
+        unmatched,
+        ExecApprovalRequirement::NeedsApproval {
+            reason: None,
+            proposed_execpolicy_amendment: Some(ExecPolicyAmendment::new(vec_str(&[
+                "git", "status"
+            ]))),
+        }
+    );
+}
+
 #[tokio::test]
 async fn exec_approval_requirement_prefers_execpolicy_match() {
     assert_exec_approval_requirement_for_command(

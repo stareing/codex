@@ -873,7 +873,27 @@ fn commands_for_exec_policy(command: &[String]) -> ExecPolicyCommands {
     commands_for_exec_policy_for_platform(command, DangerousCommandPlatform::host())
 }
 
+/// Rules and heuristics see the command an output filter wraps (`rtk git push` is `git push`), so a
+/// command-rewriting hook cannot step around a rule; the command that runs is unchanged.
 fn commands_for_exec_policy_for_platform(
+    command: &[String],
+    command_platform: DangerousCommandPlatform,
+) -> ExecPolicyCommands {
+    let ExecPolicyCommands {
+        commands,
+        command_origin,
+    } = commands_for_exec_policy_unfiltered(command, command_platform);
+    let commands = commands
+        .iter()
+        .map(|command| codex_shell_command::command_filter::unwrap_output_filter(command).to_vec())
+        .collect();
+    ExecPolicyCommands {
+        commands,
+        command_origin,
+    }
+}
+
+fn commands_for_exec_policy_unfiltered(
     command: &[String],
     command_platform: DangerousCommandPlatform,
 ) -> ExecPolicyCommands {
