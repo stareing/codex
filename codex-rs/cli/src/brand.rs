@@ -38,9 +38,14 @@ pub fn rename_command(command: Command, name: &'static str) -> Command {
 }
 
 /// The upstream product name in help text, replaced recursively (subcommands and arguments).
-/// Paths such as `~/.codex` and `$CODEX_HOME` stay as they are: they are real locations.
+/// `~/.codex` becomes the branded home ([`branded_home`]); `$CODEX_HOME` stays, it still wins.
 fn rebrand(text: &clap::builder::StyledStr) -> String {
-    text.to_string().replace("Codex", "Onigio agent")
+    rebrand_str(&text.to_string())
+}
+
+fn rebrand_str(text: &str) -> String {
+    text.replace("~/.codex", "~/.onigio")
+        .replace("Codex", "Onigio agent")
 }
 
 fn rebrand_texts(command: Command) -> Command {
@@ -80,11 +85,88 @@ pub fn get_matches(command: Command) -> ArgMatches {
     }
 }
 
+/// Overrides the branded executable's home (as the desktop app does).
+pub const BRANDED_HOME_ENV: &str = "ONIGIO_HOME";
+/// The branded executable's default home under the user's home folder.
+pub const BRANDED_HOME_DIR: &str = ".onigio";
+
+/// The home the branded executable uses when `CODEX_HOME` is not set: `$ONIGIO_HOME`, else
+/// `~/.onigio` — the desktop app's agent home, so a command typed in a terminal sees the app's
+/// sign-in and sessions, and never the official Codex app's `~/.codex`. `None` when `CODEX_HOME`
+/// is set (it wins, as upstream) or no home folder is known.
+pub fn branded_home(
+    codex_home: Option<&std::ffi::OsStr>,
+    onigio_home: Option<&std::ffi::OsStr>,
+    user_home: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    if codex_home.is_some_and(|value| !value.is_empty()) {
+        return None;
+    }
+    match onigio_home.filter(|value| !value.is_empty()) {
+        Some(value) => Some(value.into()),
+        None => user_home.map(|home| home.join(BRANDED_HOME_DIR)),
+    }
+}
+
+/// For the branded executable without `CODEX_HOME`: creates [`branded_home`] and exports it as
+/// `CODEX_HOME`, so this process and every child it starts use it.
+///
+/// # Safety
+/// Changes the process environment: call before any other thread starts.
+pub unsafe fn use_branded_home() {
+    if !invoked_as_branded() {
+        return;
+    }
+    let Some(home) = branded_home(
+        std::env::var_os("CODEX_HOME").as_deref(),
+        std::env::var_os(BRANDED_HOME_ENV).as_deref(),
+        std::env::home_dir(),
+    ) else {
+        return;
+    };
+    // A folder that cannot be made is reported by the home lookup (`CODEX_HOME points to …`).
+    let _ = std::fs::create_dir_all(&home);
+    // SAFETY: the caller guarantees no other thread runs yet.
+    unsafe { std::env::set_var("CODEX_HOME", &home) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use std::ffi::OsStr;
+
+    #[test]
+    fn the_branded_home_is_the_apps() {
+        let home = Some(std::path::PathBuf::from("/home/u"));
+        assert_eq!(
+            branded_home(None, None, home.clone()),
+            Some("/home/u/.onigio".into())
+        );
+        assert_eq!(
+            branded_home(Some(OsStr::new("")), Some(OsStr::new("")), home.clone()),
+            Some("/home/u/.onigio".into()),
+            "empty values count as unset"
+        );
+        assert_eq!(
+            branded_home(None, Some(OsStr::new("/data/agent")), home.clone()),
+            Some("/data/agent".into())
+        );
+        assert_eq!(
+            branded_home(
+                Some(OsStr::new("/x")),
+                Some(OsStr::new("/data/agent")),
+                home
+            ),
+            None,
+            "CODEX_HOME wins"
+        );
+        assert_eq!(branded_home(None, None, None), None);
+        assert_eq!(
+            rebrand_str("Codex reads ~/.codex/config.toml or $CODEX_HOME"),
+            "Onigio agent reads ~/.onigio/config.toml or $CODEX_HOME"
+        );
+    }
 
     #[test]
     fn only_the_branded_executable_is_renamed() {

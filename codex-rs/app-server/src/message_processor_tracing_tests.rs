@@ -282,6 +282,7 @@ pub(super) async fn build_test_processor(
         remote_control_handle: None,
         plugin_startup_tasks: Some(PluginStartupConfig::Current),
         remote_roots: crate::remote_roots::RemoteRoots::unrestricted(),
+        local_roots: crate::local_roots::LocalRoots::unchecked(),
         remote_threads: std::sync::Arc::new(crate::remote_threads::RemoteThreads::off()),
     }));
     (processor, outgoing_rx)

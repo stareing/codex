@@ -14,7 +14,8 @@
 //! run `app-server --remote-control` themselves and own that decision. A value that is set but names
 //! no usable folder refuses everything (fail closed).
 //!
-//! Local connections (stdio, in-process, websocket) are never checked.
+//! Local connections (stdio, websocket) are checked the same way only when the launcher names a roots
+//! file (`local_roots`, `SITE_LOCAL_ALLOWED_ROOTS_FILE`); in-process connections never are.
 
 use std::path::Component;
 use std::path::Path;
@@ -37,6 +38,8 @@ pub(crate) struct RemoteRoots {
     base: PathBuf,
     /// Saved threads live here; a remote resume may name a rollout file under it.
     codex_home: PathBuf,
+    /// Held to these folders as a local connection (`local_roots`): refusals say so.
+    local: bool,
 }
 
 impl RemoteRoots {
@@ -85,6 +88,7 @@ impl RemoteRoots {
             roots,
             base,
             codex_home,
+            local: false,
         }
     }
 
@@ -93,7 +97,29 @@ impl RemoteRoots {
             roots: None,
             base: PathBuf::new(),
             codex_home: PathBuf::new(),
+            local: false,
         }
+    }
+
+    /// The same roots, for a connection from this computer (refusals name the launcher's folders).
+    pub(crate) fn local(mut self) -> Self {
+        self.local = true;
+        self
+    }
+
+    /// Who a refusal is about: `remote control …` or `this session …`.
+    pub(crate) fn subject(&self) -> &'static str {
+        if self.local {
+            "this session"
+        } else {
+            "remote control"
+        }
+    }
+
+    /// A categorical refusal from [`request_scope`] (worded for remote control) for this connection.
+    pub(crate) fn reword(&self, reason: &str) -> String {
+        let rest = reason.strip_prefix("remote control ").unwrap_or(reason);
+        format!("{} {rest}", self.subject())
     }
 
     pub(crate) fn is_restricted(&self) -> bool {
@@ -105,11 +131,11 @@ impl RemoteRoots {
         let Some(roots) = &self.roots else {
             return Ok(());
         };
-        let resolved = resolve(&self.base, path).ok_or_else(|| refusal(path))?;
+        let resolved = resolve(&self.base, path).ok_or_else(|| self.refusal(path))?;
         if roots.iter().any(|root| resolved.starts_with(root)) {
             Ok(())
         } else {
-            Err(refusal(path))
+            Err(self.refusal(path))
         }
     }
 
@@ -130,12 +156,21 @@ impl RemoteRoots {
     }
 }
 
-fn refusal(path: &Path) -> String {
-    format!(
-        "remote control may only use the folders allowed on this computer; `{}` is outside them \
-         (restart remote-control with --allow <DIR> to allow it)",
-        path.display()
-    )
+impl RemoteRoots {
+    fn refusal(&self, path: &Path) -> String {
+        if self.local {
+            return format!(
+                "this session may only use the folders allowed in the app; `{}` is outside them \
+                 (allow the folder in the app first)",
+                path.display()
+            );
+        }
+        format!(
+            "remote control may only use the folders allowed on this computer; `{}` is outside them \
+             (restart remote-control with --allow <DIR> to allow it)",
+            path.display()
+        )
+    }
 }
 
 /// Absolute, canonical form of `path`; `None` when it escapes through `..` below the deepest
@@ -377,7 +412,9 @@ pub(crate) fn request_scope(request: &ClientRequest) -> RequestScope {
         ClientRequest::ThreadCompactStart { params, .. } => RequestScope::thread(&params.thread_id),
         ClientRequest::ThreadQueueStart { params, .. } => RequestScope::thread(&params.thread_id),
         // A rewind writes in the thread's folders: the thread must be one --allow covers.
-        ClientRequest::ThreadCheckpointList { params, .. } => RequestScope::thread(&params.thread_id),
+        ClientRequest::ThreadCheckpointList { params, .. } => {
+            RequestScope::thread(&params.thread_id)
+        }
         ClientRequest::ThreadCheckpointRewindFiles { params, .. } => {
             RequestScope::thread(&params.thread_id)
         }

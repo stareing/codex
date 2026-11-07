@@ -132,6 +132,7 @@ mod notification_media;
 mod otel_reloader;
 mod outgoing_message;
 mod plugin_config_reload;
+mod local_roots;
 mod remote_roots;
 mod remote_threads;
 mod request_processors;
@@ -995,6 +996,10 @@ pub async fn run_main_with_transport_options(
             config.cwd.to_path_buf(),
             config.codex_home.to_path_buf(),
         );
+        let local_roots = crate::local_roots::LocalRoots::from_env(
+            config.cwd.to_path_buf(),
+            config.codex_home.to_path_buf(),
+        );
         let remote_threads = Arc::new(crate::remote_threads::RemoteThreads::new(
             runtime_options.remote_control_sessions_file.clone(),
         ));
@@ -1024,6 +1029,7 @@ pub async fn run_main_with_transport_options(
             )
             .then_some(plugin_startup_config),
             remote_roots,
+            local_roots,
             remote_threads: Arc::clone(&remote_threads),
         }));
         let mut thread_created_rx = processor.thread_created_receiver();
