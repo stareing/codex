@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "FsSearchTextMatch": {
+      "description": "One matching line from `fs/searchText`.",
+      "properties": {
+        "line": {
+          "description": "The line, trimmed and cut to 300 characters.",
+          "type": "string"
+        },
+        "lineNumber": {
+          "description": "1-based.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Relative to `root`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "lineNumber",
+        "path"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Matches returned by `fs/searchText`, in path order.",
+  "properties": {
+    "matches": {
+      "items": {
+        "$ref": "#/definitions/FsSearchTextMatch"
+      },
+      "type": "array"
+    },
+    "truncated": {
+      "description": "The search stopped early (result limit, deadline or cancelled).",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "matches",
+    "truncated"
+  ],
+  "title": "FsSearchTextResponse",
+  "type": "object"
+}

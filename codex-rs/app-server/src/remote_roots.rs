@@ -410,6 +410,9 @@ pub(crate) fn request_scope(request: &ClientRequest) -> RequestScope {
             params.destination_path.to_path_buf(),
         ]),
         ClientRequest::FsWatch { params, .. } => RequestScope::paths([params.path.to_path_buf()]),
+        ClientRequest::FsSearchText { params, .. } => {
+            RequestScope::paths([params.root.to_path_buf()])
+        }
         ClientRequest::FuzzyFileSearch { params, .. } => {
             RequestScope::folders_or_server(params.roots.iter().map(PathBuf::from))
         }

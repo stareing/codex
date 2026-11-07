@@ -1532,6 +1532,30 @@
             },
             "method": {
               "enum": [
+                "fs/searchText"
+              ],
+              "title": "Fs/searchTextRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/FsSearchTextParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Fs/searchTextRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "fs/remove"
               ],
               "title": "Fs/removeRequestMethod",
@@ -12339,6 +12363,92 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "Successful response for `fs/remove`.",
         "title": "FsRemoveResponse",
+        "type": "object"
+      },
+      "FsSearchTextMatch": {
+        "description": "One matching line from `fs/searchText`.",
+        "properties": {
+          "line": {
+            "description": "The line, trimmed and cut to 300 characters.",
+            "type": "string"
+          },
+          "lineNumber": {
+            "description": "1-based.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Relative to `root`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line",
+          "lineNumber",
+          "path"
+        ],
+        "type": "object"
+      },
+      "FsSearchTextParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Find the lines that contain `query` (a literal) in the files under `root`.",
+        "properties": {
+          "caseSensitive": {
+            "description": "Defaults to `false` (case-insensitive).",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "maxResults": {
+            "description": "Defaults to 200, at most 1000.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "query": {
+            "type": "string"
+          },
+          "root": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/v2/AbsolutePathBuf"
+              }
+            ],
+            "description": "Absolute folder to search."
+          }
+        },
+        "required": [
+          "query",
+          "root"
+        ],
+        "title": "FsSearchTextParams",
+        "type": "object"
+      },
+      "FsSearchTextResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Matches returned by `fs/searchText`, in path order.",
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/definitions/v2/FsSearchTextMatch"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "The search stopped early (result limit, deadline or cancelled).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "matches",
+          "truncated"
+        ],
+        "title": "FsSearchTextResponse",
         "type": "object"
       },
       "FsUnwatchParams": {

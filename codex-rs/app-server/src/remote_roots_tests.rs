@@ -246,6 +246,14 @@ fn request_scopes_name_every_folder_the_request_uses() {
     );
     assert_eq!(
         scope_of(
+            "fs/searchText",
+            serde_json::json!({"root": "/srv", "query": "a"})
+        )
+        .paths,
+        vec![PathBuf::from("/srv")]
+    );
+    assert_eq!(
+        scope_of(
             "fuzzyFileSearch/sessionStart",
             serde_json::json!({"sessionId": "s", "roots": ["/w"]})
         )

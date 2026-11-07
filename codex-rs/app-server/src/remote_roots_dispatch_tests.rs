@@ -128,6 +128,15 @@ async fn remote_requests_outside_the_allowed_folders_are_refused_body() -> Resul
     let files = serde_json::to_value(response.result)?["files"].clone();
     assert_eq!(files[0]["path"], json!("in.txt"), "{files}");
 
+    // Neither may a text search.
+    h.send(
+        8,
+        "fs/searchText",
+        json!({"root": folders.outside, "query": "out"}),
+    )
+    .await;
+    assert_eq!(refusal(h.response().await, 8).code, -32600);
+
     // Requests the allow-list cannot judge are refused outright.
     h.send(
         7,

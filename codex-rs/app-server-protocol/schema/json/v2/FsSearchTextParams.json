@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AbsolutePathBuf": {
+      "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
+      "type": "string"
+    }
+  },
+  "description": "Find the lines that contain `query` (a literal) in the files under `root`.",
+  "properties": {
+    "caseSensitive": {
+      "description": "Defaults to `false` (case-insensitive).",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "maxResults": {
+      "description": "Defaults to 200, at most 1000.",
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "query": {
+      "type": "string"
+    },
+    "root": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      ],
+      "description": "Absolute folder to search."
+    }
+  },
+  "required": [
+    "query",
+    "root"
+  ],
+  "title": "FsSearchTextParams",
+  "type": "object"
+}

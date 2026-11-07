@@ -1286,6 +1286,11 @@ impl MessageProcessor {
                 .read_directory(params)
                 .await
                 .map(|response| Some(response.into())),
+            ClientRequest::FsSearchText { params, .. } => self
+                .search_processor
+                .search_text(params)
+                .await
+                .map(|response| Some(response.into())),
             ClientRequest::FsRemove { params, .. } => self
                 .fs_processor
                 .remove(params)
