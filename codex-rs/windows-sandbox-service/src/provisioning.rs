@@ -100,7 +100,7 @@ pub(crate) fn run(
     }
     let helper = std::env::current_exe()
         .context("locate the provisioning service executable")?
-        .with_file_name("codex-windows-sandbox-setup.exe");
+        .with_file_name(codex_windows_sandbox::SETUP_EXE);
     let helper_metadata = helper
         .symlink_metadata()
         .with_context(|| format!("inspect packaged setup helper {}", helper.display()))?;

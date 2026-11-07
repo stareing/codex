@@ -445,8 +445,8 @@ fn validate_package(root: &Path) -> Result<()> {
     ];
     if cfg!(windows) {
         names.extend([
-            "codex-resources/codex-command-runner.exe",
-            "codex-resources/codex-windows-sandbox-setup.exe",
+            "codex-resources/onigio-command-runner.exe",
+            "codex-resources/onigio-windows-sandbox-setup.exe",
         ]);
     } else if cfg!(target_os = "linux") {
         names.push("codex-resources/bwrap");

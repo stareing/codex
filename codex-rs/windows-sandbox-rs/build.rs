@@ -1,7 +1,12 @@
 use std::env;
 use std::path::PathBuf;
 
-const SETUP_BIN: &str = "codex-windows-sandbox-setup";
+#[allow(dead_code)]
+mod helper_names {
+    include!("src/helper_names.rs");
+}
+use helper_names::SETUP_BIN;
+
 const SETUP_MANIFEST: &str = "codex-windows-sandbox-setup.manifest";
 
 fn main() -> Result<(), String> {

@@ -11,11 +11,11 @@ path = "src/lib.rs"
 doctest = false
 
 [[bin]]
-name = "codex-windows-sandbox-setup"
+name = "onigio-windows-sandbox-setup"
 path = "src/bin/setup_main/main.rs"
 
 [[bin]]
-name = "codex-command-runner"
+name = "onigio-command-runner"
 path = "src/bin/command_runner/main.rs"
 
 [[bin]]

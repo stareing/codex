@@ -83,6 +83,11 @@ mod env;
 mod file_write;
 #[cfg(target_os = "windows")]
 mod framed_io;
+mod helper_names;
+pub use helper_names::COMMAND_RUNNER_BIN;
+pub use helper_names::COMMAND_RUNNER_EXE;
+pub use helper_names::SETUP_BIN;
+pub use helper_names::SETUP_EXE;
 #[cfg(target_os = "windows")]
 mod helper_materialization;
 #[cfg(target_os = "windows")]

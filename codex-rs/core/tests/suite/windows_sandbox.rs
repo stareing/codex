@@ -105,7 +105,7 @@ fn stage_windows_sandbox_helpers() -> anyhow::Result<()> {
                 .with_context(|| format!("create resources dir {}", resources_dir.display()));
         }
     }
-    for helper_name in ["codex-windows-sandbox-setup", "codex-command-runner"] {
+    for helper_name in ["onigio-windows-sandbox-setup", "onigio-command-runner"] {
         let helper = codex_utils_cargo_bin::cargo_bin(helper_name)?;
         let file_name = Path::new(helper_name).with_extension("exe");
         let destination = resources_dir.join(file_name);
@@ -141,7 +141,7 @@ fn stage_windows_sandbox_cli(fixture_bin: &Path) -> anyhow::Result<(PathBuf, Pat
     let codex = fixture_bin.join("codex.exe");
     std::fs::copy(&codex_source, &codex)
         .with_context(|| format!("copy {} to {}", codex_source.display(), codex.display()))?;
-    for helper_name in ["codex-windows-sandbox-setup", "codex-command-runner"] {
+    for helper_name in ["onigio-windows-sandbox-setup", "onigio-command-runner"] {
         let helper = codex_utils_cargo_bin::cargo_bin(helper_name)?;
         let destination = resources_dir.join(Path::new(helper_name).with_extension("exe"));
         std::fs::copy(&helper, &destination)

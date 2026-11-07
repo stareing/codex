@@ -117,7 +117,7 @@ pub(crate) fn verify_registered_core_runner(process: HANDLE, expected_runner: &P
             staged
                 .join("app")
                 .join("resources")
-                .join("codex-command-runner.exe")
+                .join(crate::helper_names::COMMAND_RUNNER_EXE)
                 .as_os_str()
         ),
         "registered alias selected a different package identity"
