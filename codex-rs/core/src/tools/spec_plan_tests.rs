@@ -1361,7 +1361,7 @@ async fn models_without_apply_patch_get_the_file_tools() {
         });
     })
     .await;
-    without.assert_visible_contains(&["Read", "Edit", "Write"]);
+    without.assert_visible_contains(&["Read", "Edit", "Write", "Glob", "Grep"]);
     without.assert_visible_lacks(&["apply_patch"]);
 
     let with = probe(|turn| {
@@ -1372,7 +1372,7 @@ async fn models_without_apply_patch_get_the_file_tools() {
     })
     .await;
     with.assert_visible_contains(&["apply_patch"]);
-    with.assert_visible_lacks(&["Read", "Edit", "Write"]);
+    with.assert_visible_lacks(&["Read", "Edit", "Write", "Glob", "Grep"]);
 
     let no_environment = probe(|turn| {
         turn.initial_environments.environments.clear();
@@ -1381,7 +1381,7 @@ async fn models_without_apply_patch_get_the_file_tools() {
         });
     })
     .await;
-    no_environment.assert_registered_lacks(&["Read", "Edit", "Write"]);
+    no_environment.assert_registered_lacks(&["Read", "Edit", "Write", "Glob", "Grep"]);
 }
 
 #[tokio::test]

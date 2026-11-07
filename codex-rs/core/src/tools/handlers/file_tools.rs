@@ -49,7 +49,7 @@ const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
 const ENVIRONMENT_ID_DESCRIPTION: &str =
     "Environment id from <environment_context>. Omit to use the primary environment.";
 
-fn properties(
+pub(crate) fn properties(
     fields: Vec<(&str, JsonSchema)>,
     include_environment_id: bool,
 ) -> BTreeMap<String, JsonSchema> {
@@ -66,7 +66,7 @@ fn properties(
     map
 }
 
-fn function_tool(
+pub(crate) fn function_tool(
     name: &str,
     description: &str,
     properties: BTreeMap<String, JsonSchema>,
@@ -86,11 +86,11 @@ fn function_tool(
     })
 }
 
-fn text(description: &str) -> JsonSchema {
+pub(crate) fn text(description: &str) -> JsonSchema {
     JsonSchema::string(Some(description.to_string()))
 }
 
-fn function_arguments(payload: ToolPayload, tool: &str) -> Result<String, FunctionCallError> {
+pub(crate) fn function_arguments(payload: ToolPayload, tool: &str) -> Result<String, FunctionCallError> {
     match payload {
         ToolPayload::Function { arguments } => Ok(arguments),
         _ => Err(FunctionCallError::RespondToModel(format!(
@@ -99,8 +99,25 @@ fn function_arguments(payload: ToolPayload, tool: &str) -> Result<String, Functi
     }
 }
 
-fn refuse(message: impl Into<String>) -> FunctionCallError {
+pub(crate) fn refuse(message: impl Into<String>) -> FunctionCallError {
     FunctionCallError::RespondToModel(message.into())
+}
+
+/// The environment a file or search tool call runs in (`environment_id`, or the primary one).
+pub(crate) fn turn_environment(
+    invocation: &ToolInvocation,
+    tool: &str,
+    environment_id: Option<&str>,
+    multi_environment: bool,
+) -> Result<TurnEnvironment, FunctionCallError> {
+    if environment_id.is_some() && !multi_environment {
+        return Err(refuse(format!(
+            "{tool}: environment selection is unavailable for this turn"
+        )));
+    }
+    resolve_tool_environment(&invocation.step_context.environments, environment_id)?
+        .cloned()
+        .ok_or_else(|| refuse(format!("{tool} is unavailable in this session")))
 }
 
 /// One file the tools work on, resolved against the selected environment.
@@ -124,17 +141,7 @@ impl Target {
         if file_path.contains(['\n', '\r', '\0']) {
             return Err(refuse(format!("{tool}: file_path must be a single line")));
         }
-        if environment_id.is_some() && !multi_environment {
-            return Err(refuse(format!(
-                "{tool}: environment selection is unavailable for this turn"
-            )));
-        }
-        let Some(environment) =
-            resolve_tool_environment(&invocation.step_context.environments, environment_id)?
-                .cloned()
-        else {
-            return Err(refuse(format!("{tool} is unavailable in this session")));
-        };
+        let environment = turn_environment(invocation, tool, environment_id, multi_environment)?;
         let path = environment.cwd().join(file_path).map_err(|err| {
             refuse(format!(
                 "{tool}: unable to resolve `{file_path}` against `{}`: {err}",

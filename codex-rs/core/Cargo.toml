@@ -34,6 +34,7 @@ codex-config = { workspace = true }
 codex-core-plugins = { workspace = true }
 codex-diagnostics = { workspace = true }
 codex-exec-server = { workspace = true }
+codex-file-search = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-extension-items = { workspace = true }
 codex-features = { workspace = true }

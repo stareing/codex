@@ -128,3 +128,65 @@ async fn read_returns_numbered_lines() -> Result<()> {
     assert!(output.contains("pass offset 3"), "{output}");
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grep_and_glob_search_like_claude_code() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let harness = harness().await?;
+    harness
+        .write_file("src/app.rs", "fn main() {\n    let needle = 1;\n}\n")
+        .await?;
+    harness
+        .write_file("src/other.rs", "fn other() {}\n")
+        .await?;
+
+    let output = call(
+        &harness,
+        "grep-1",
+        "Grep",
+        json!({ "pattern": "needle", "output_mode": "content", "-n": "true" }),
+    )
+    .await?;
+    assert_eq!(output, "src/app.rs:2:    let needle = 1;");
+
+    let output = call(
+        &harness,
+        "grep-2",
+        "Grep",
+        json!({ "pattern": "fn ", "glob": "*.rs" }),
+    )
+    .await?;
+    assert!(output.starts_with("Found 2 files\n"), "{output}");
+
+    let output = call(
+        &harness,
+        "glob-1",
+        "Glob",
+        json!({ "pattern": "src/**/*.rs" }),
+    )
+    .await?;
+    let mut files: Vec<&str> = output.lines().collect();
+    files.sort();
+    assert_eq!(files, ["src/app.rs", "src/other.rs"]);
+
+    let output = call(
+        &harness,
+        "glob-2",
+        "Glob",
+        json!({ "pattern": "*.rs", "path": "nope" }),
+    )
+    .await?;
+    assert!(
+        output.starts_with("Directory does not exist: nope."),
+        "{output}"
+    );
+
+    let names = tool_names(&harness.request_bodies().await[0]);
+    for name in ["Glob", "Grep"] {
+        assert!(
+            names.iter().any(|n| n == name),
+            "{name} missing from {names:?}"
+        );
+    }
+    Ok(())
+}

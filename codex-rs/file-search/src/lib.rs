@@ -35,6 +35,7 @@ use nucleo::pattern::AtomKind;
 use nucleo::pattern::Pattern;
 
 mod cli;
+pub mod rg_search;
 pub mod text_search;
 
 pub use cli::Cli;

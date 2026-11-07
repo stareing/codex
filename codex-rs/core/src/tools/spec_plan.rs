@@ -12,6 +12,8 @@ use crate::tools::handlers::CodeModeWaitHandler;
 use crate::tools::handlers::CurrentTimeHandler;
 use crate::tools::handlers::DynamicToolHandler;
 use crate::tools::handlers::EditFileHandler;
+use crate::tools::handlers::GlobHandler;
+use crate::tools::handlers::GrepHandler;
 use crate::tools::handlers::ExecCommandHandler;
 use crate::tools::handlers::ExecCommandHandlerOptions;
 use crate::tools::handlers::GetContextRemainingHandler;
@@ -1279,6 +1281,9 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         registry.add(ReadFileHandler::new(include_environment_id));
         registry.add(EditFileHandler::new(include_environment_id));
         registry.add(WriteFileHandler::new(include_environment_id));
+        // Claude Code's search tools beside them (search_tools.rs).
+        registry.add(GlobHandler::new(include_environment_id));
+        registry.add(GrepHandler::new(include_environment_id));
     }
 
     if context
