@@ -37,6 +37,7 @@ use crate::transport::ConnectionOrigin;
 use crate::transport::ConnectionState;
 use crate::transport::DaemonShutdownAccess;
 use crate::transport::OutboundConnectionState;
+use crate::transport::RemoteControlHandle;
 use crate::transport::RemoteControlPolicy;
 use crate::transport::RemoteControlStartConfig;
 use crate::transport::SiteRelay;
@@ -132,6 +133,7 @@ mod otel_reloader;
 mod outgoing_message;
 mod plugin_config_reload;
 mod remote_roots;
+mod remote_threads;
 mod request_processors;
 mod request_serialization;
 mod server_request_error;
@@ -189,6 +191,17 @@ enum OutboundControlEvent {
     Closed { connection_id: ConnectionId },
     /// Disconnect all connection-oriented clients during graceful restart.
     DisconnectAll,
+}
+
+/// Connects to or leaves the relay as the sessions file says (`remote_threads`).
+async fn apply_sessions_relay(handle: &RemoteControlHandle, relay: bool) {
+    if relay {
+        if let Err(err) = handle.enable_ephemeral() {
+            warn!("remote control: could not join the relay: {err:?}");
+        }
+    } else {
+        handle.disable_ephemeral().await;
+    }
 }
 
 #[derive(Default)]
@@ -476,6 +489,9 @@ pub struct AppServerRuntimeOptions {
     /// Folders remote-control requests may use; `None` reads `SITE_RELAY_ALLOWED_ROOTS`, and when
     /// that is unset too, remote control is unrestricted (see `remote_roots`).
     pub remote_control_allowed_roots: Option<Vec<std::path::PathBuf>>,
+    /// The sessions file that limits which sessions remote control reaches and whether this computer is on the
+    /// relay (see `remote_threads`); `None` = every session, as upstream.
+    pub remote_control_sessions_file: Option<std::path::PathBuf>,
 }
 
 impl Default for AppServerRuntimeOptions {
@@ -487,6 +503,7 @@ impl Default for AppServerRuntimeOptions {
             install_shutdown_signal_handler: true,
             managed_daemon: false,
             remote_control_allowed_roots: None,
+            remote_control_sessions_file: None,
         }
     }
 }
@@ -978,6 +995,9 @@ pub async fn run_main_with_transport_options(
             config.cwd.to_path_buf(),
             config.codex_home.to_path_buf(),
         );
+        let remote_threads = Arc::new(crate::remote_threads::RemoteThreads::new(
+            runtime_options.remote_control_sessions_file.clone(),
+        ));
         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
             outgoing: outgoing_message_sender,
             analytics_events_client,
@@ -1004,6 +1024,7 @@ pub async fn run_main_with_transport_options(
             )
             .then_some(plugin_startup_config),
             remote_roots,
+            remote_threads: Arc::clone(&remote_threads),
         }));
         let mut thread_created_rx = processor.thread_created_receiver();
         let mut running_turn_count_rx = processor.subscribe_running_assistant_turn_count();
@@ -1014,6 +1035,13 @@ pub async fn run_main_with_transport_options(
         let mut remote_control_status_rx = remote_control_handle.status_receiver();
         let mut remote_control_status = remote_control_status_rx.borrow().clone();
         let transport_shutdown_token = transport_shutdown_token.clone();
+        // Remote clients' disconnect tokens: a session taken away from remote control drops them all (they
+        // reconnect and see only what is still shared).
+        let mut remote_disconnects = HashMap::<ConnectionId, CancellationToken>::new();
+        let mut shared_sessions = remote_threads.current();
+        let mut sessions_tick = tokio::time::interval(std::time::Duration::from_secs(1));
+        sessions_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let sessions_relay = remote_control_handle.clone();
         async move {
             let recovery_task = if managed_daemon {
                 match daemon_thread_recovery::start_recovery(
@@ -1127,6 +1155,11 @@ pub async fn run_main_with_transport_options(
                                 writer,
                                 disconnect_sender,
                             } => {
+                                if origin == ConnectionOrigin::RemoteControl
+                                    && let Some(token) = &disconnect_sender
+                                {
+                                    remote_disconnects.insert(connection_id, token.clone());
+                                }
                                 let outbound_initialized = Arc::new(AtomicBool::new(false));
                                 let outbound_experimental_api_enabled =
                                     Arc::new(AtomicBool::new(false));
@@ -1162,6 +1195,7 @@ pub async fn run_main_with_transport_options(
                                 );
                             }
                             TransportEvent::ConnectionClosed { connection_id } => {
+                                remote_disconnects.remove(&connection_id);
                                 let Some(connection_state) = connections.remove(&connection_id) else {
                                     continue;
                                 };
@@ -1275,6 +1309,27 @@ pub async fn run_main_with_transport_options(
                             warn!("thread listener attachment failed: {err}");
                         }
                     }
+                    _ = sessions_tick.tick(), if remote_threads.is_on() => {
+                        let next = remote_threads.current();
+                        if *next != *shared_sessions {
+                            if shared_sessions.narrowed_to(&next) {
+                                info!(
+                                    "remote control sessions narrowed; disconnecting {} remote client(s)",
+                                    remote_disconnects.len()
+                                );
+                                for token in remote_disconnects.values() {
+                                    token.cancel();
+                                }
+                            }
+                            shared_sessions = next;
+                        }
+                        // The file decides the relay (also over an enable that arrived another way).
+                        let on_relay = sessions_relay.status().status
+                            != codex_app_server_protocol::RemoteControlConnectionStatus::Disabled;
+                        if shared_sessions.relay != on_relay {
+                            apply_sessions_relay(&sessions_relay, shared_sessions.relay).await;
+                        }
+                    }
                     changed = remote_control_status_rx.changed() => {
                         if changed.is_err() {
                             continue;
@@ -1293,8 +1348,14 @@ pub async fn run_main_with_transport_options(
                         match created {
                             Ok(thread_id) => {
                                 let mut initialized_connection_ids = Vec::new();
+                                // A new session is not shared with remote control until the user shares it.
+                                let shared = remote_threads.current();
+                                let remote_may_see = shared.allows_thread(&thread_id.to_string());
                                 for (connection_id, connection_state) in &connections {
-                                    if connection_state.session.initialized() {
+                                    if connection_state.session.initialized()
+                                        && (remote_may_see
+                                            || connection_state.origin != ConnectionOrigin::RemoteControl)
+                                    {
                                         initialized_connection_ids.push(*connection_id);
                                     }
                                 }

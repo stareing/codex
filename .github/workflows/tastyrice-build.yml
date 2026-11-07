@@ -191,6 +191,7 @@ jobs:
             run -p codex-cli --test site_account_names
             run -p codex-core --lib site_account_provider
             run -p codex-app-server --lib remote_roots
+            run -p codex-app-server --lib remote_threads
             run -p codex-app-server --test all suite::v2::fs::
             run -p codex-app-server-protocol
             run -p codex-file-search --lib text_search
