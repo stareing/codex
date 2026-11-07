@@ -11,6 +11,7 @@ use crate::tools::handlers::CodeModeExecuteHandler;
 use crate::tools::handlers::CodeModeWaitHandler;
 use crate::tools::handlers::CurrentTimeHandler;
 use crate::tools::handlers::DynamicToolHandler;
+use crate::tools::handlers::EditFileHandler;
 use crate::tools::handlers::ExecCommandHandler;
 use crate::tools::handlers::ExecCommandHandlerOptions;
 use crate::tools::handlers::GetContextRemainingHandler;
@@ -19,6 +20,7 @@ use crate::tools::handlers::ListMcpResourceTemplatesHandler;
 use crate::tools::handlers::ListMcpResourcesHandler;
 use crate::tools::handlers::NewContextWindowHandler;
 use crate::tools::handlers::PlanHandler;
+use crate::tools::handlers::ReadFileHandler;
 use crate::tools::handlers::ReadMcpResourceHandler;
 use crate::tools::handlers::RequestPermissionsHandler;
 use crate::tools::handlers::RequestPluginInstallHandler;
@@ -30,6 +32,7 @@ use crate::tools::handlers::TestSyncHandler;
 use crate::tools::handlers::ToolSearchHandlerCache;
 use crate::tools::handlers::ViewImageHandler;
 use crate::tools::handlers::WaitForEnvironmentHandler;
+use crate::tools::handlers::WriteFileHandler;
 use crate::tools::handlers::WriteStdinHandler;
 use crate::tools::handlers::extension_tools::ExtensionToolAdapter;
 use crate::tools::handlers::multi_agents::CloseAgentHandler;
@@ -1269,6 +1272,13 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     if environment_mode.has_environment() && context.model_info.apply_patch_tool_type.is_some() {
         let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
         registry.add(ApplyPatchHandler::new(include_environment_id));
+    } else if environment_mode.has_environment() {
+        // Models without apply_patch (third-party models behind a gateway) read and change files with plain
+        // JSON tools; the changes still go through apply_patch's approval and sandbox path (file_tools.rs).
+        let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
+        registry.add(ReadFileHandler::new(include_environment_id));
+        registry.add(EditFileHandler::new(include_environment_id));
+        registry.add(WriteFileHandler::new(include_environment_id));
     }
 
     if context

@@ -1354,6 +1354,37 @@ async fn environment_count_controls_environment_backed_tools() {
 }
 
 #[tokio::test]
+async fn models_without_apply_patch_get_the_file_tools() {
+    let without = probe(|turn| {
+        update_turn_settings_for_test(turn, |settings| {
+            Arc::make_mut(&mut settings.model_info).apply_patch_tool_type = None;
+        });
+    })
+    .await;
+    without.assert_visible_contains(&["Read", "Edit", "Write"]);
+    without.assert_visible_lacks(&["apply_patch"]);
+
+    let with = probe(|turn| {
+        update_turn_settings_for_test(turn, |settings| {
+            Arc::make_mut(&mut settings.model_info).apply_patch_tool_type =
+                Some(ApplyPatchToolType::Freeform);
+        });
+    })
+    .await;
+    with.assert_visible_contains(&["apply_patch"]);
+    with.assert_visible_lacks(&["Read", "Edit", "Write"]);
+
+    let no_environment = probe(|turn| {
+        turn.initial_environments.environments.clear();
+        update_turn_settings_for_test(turn, |settings| {
+            Arc::make_mut(&mut settings.model_info).apply_patch_tool_type = None;
+        });
+    })
+    .await;
+    no_environment.assert_registered_lacks(&["Read", "Edit", "Write"]);
+}
+
+#[tokio::test]
 async fn environment_tools_follow_the_step_context() {
     let (_session, mut turn) = make_session_and_context().await;
     update_turn_settings_for_test(&mut turn, |settings| {

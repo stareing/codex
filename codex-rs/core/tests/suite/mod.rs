@@ -44,6 +44,7 @@ mod agents_md;
 mod app_tool_exposure;
 mod apply_patch_cli;
 mod apply_patch_serialization;
+mod file_tools;
 #[cfg(target_os = "macos")]
 mod apply_patch_system_aliases;
 #[cfg(not(target_os = "windows"))]
