@@ -592,6 +592,9 @@ impl OpenAiModelsManager {
         self.endpoint_client.uses_codex_backend().await
             || self.endpoint_client.has_command_auth()
             || self.supports_api_key_discovery()
+            // A provider serving its own catalog may authenticate by transport alone (the cloud
+            // sandbox's gateway socket), with no key for the discovery check above.
+            || self.own_catalog_fallback.is_some()
     }
 
     /// Publish only while the request identity still matches, including after async storage.

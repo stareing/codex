@@ -283,11 +283,15 @@ async fn site_provider_uses_its_own_catalog_seeded_with_the_suggested_model() {
         .expect("site provider");
     assert!(empty.models.is_empty());
 
-    // Other providers, or an explicit model_catalog_json, keep upstream behaviour.
-    assert_eq!(
-        own_catalog_fallback("openai", &config.model_provider, Some("x"), None),
-        None
-    );
+    // Any provider naming its own catalog URL gets the same treatment (the cloud sandbox's gateway).
+    let gateway = own_catalog_fallback("gateway", &config.model_provider, Some("x"), None)
+        .expect("a provider with its own catalog URL");
+    assert_eq!(gateway.models.len(), 1);
+
+    // Providers without one, or an explicit model_catalog_json, keep upstream behaviour.
+    let mut upstream = config.model_provider.clone();
+    upstream.model_catalog_url = None;
+    assert_eq!(own_catalog_fallback("openai", &upstream, Some("x"), None), None);
     let configured = ModelsResponse { models: Vec::new() };
     assert_eq!(
         own_catalog_fallback(

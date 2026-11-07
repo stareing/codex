@@ -129,6 +129,23 @@ async fn own_catalog_replaces_bundled_presets_and_fetches_without_the_feature_fl
 }
 
 #[tokio::test]
+async fn own_catalog_is_fetched_when_the_transport_alone_authenticates() {
+    // The cloud sandbox reaches the site's gateway over a per-tenant socket: no key, no auth.
+    let served = vec![remote_model("gateway-a", "Gateway A", /*priority*/ 0)];
+    let endpoint = TestModelsEndpoint::without_refresh(vec![served.clone()]);
+    let manager = OpenAiModelsManager::new_without_cache(endpoint.clone(), None)
+        .with_own_catalog(Vec::new());
+    assert_eq!(
+        manager
+            .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
+            .await
+            .models,
+        served
+    );
+    assert_eq!(endpoint.fetch_count(), 1);
+}
+
+#[tokio::test]
 async fn own_catalog_merges_a_hidden_only_list_into_the_fallback_not_the_bundled_presets() {
     let fallback = vec![remote_model("suggested", "Suggested", /*priority*/ 0)];
     let hidden = vec![remote_model_with_visibility(
