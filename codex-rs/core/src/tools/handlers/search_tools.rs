@@ -34,6 +34,8 @@ use crate::session::turn_context::TurnEnvironment;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::boxed_tool_output;
+use crate::tools::handlers::file_access::Access;
+use crate::tools::handlers::file_access::ensure_access;
 use crate::tools::handlers::file_tools::function_arguments;
 use crate::tools::handlers::file_tools::function_tool;
 use crate::tools::handlers::file_tools::properties;
@@ -509,6 +511,16 @@ impl ToolExecutor<ToolInvocation> for GlobHandler {
                     relative_pattern = rest;
                 }
             }
+            let asked = path.as_deref().unwrap_or(".");
+            ensure_access(
+                &invocation,
+                &environment,
+                tool,
+                asked,
+                &search_dir,
+                Access::Read,
+            )
+            .await?;
             let cwd = scope.cwd.clone();
             let readable = Arc::clone(&scope.readable);
             let found = run_search(&invocation, move |cancelled| {
@@ -675,16 +687,27 @@ impl ToolExecutor<ToolInvocation> for GrepHandler {
                 self.multi_environment,
             )?;
             let scope = SearchScope::new(tool, &environment)?;
-            let target = match string_arg(&map, tool, "path")? {
+            let raw_path = string_arg(&map, tool, "path")?;
+            let target = match &raw_path {
                 Some(raw) => {
-                    let target = scope.expand(&raw);
+                    let target = scope.expand(raw);
                     if !target.exists() {
-                        return Err(scope.missing("Path", &raw, &target));
+                        return Err(scope.missing("Path", raw, &target));
                     }
                     target
                 }
                 None => scope.cwd.clone(),
             };
+            let asked = raw_path.as_deref().unwrap_or(".");
+            ensure_access(
+                &invocation,
+                &environment,
+                tool,
+                asked,
+                &target,
+                Access::Read,
+            )
+            .await?;
             let request = GrepRequest {
                 cwd: scope.cwd.clone(),
                 target,
