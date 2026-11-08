@@ -12,6 +12,7 @@ runs:
       shell: bash
       env:
         TARGET: ${{ inputs.target }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
 
@@ -42,7 +43,13 @@ runs:
         fi
 
         mkdir -p "${binding_dir}"
-        curl -fsSL "${base_url}/${checksums_name}" -o "${checksums_path}"
+        # tastyrice: the release download links of openai/codex answer 504 since 11-08 while the
+        # API asset endpoint serves the same bytes, so fall back to it (checksums below still apply).
+        fetch() {
+          curl -fsSL --retry 2 "${base_url}/$1" -o "$2" \
+            || gh release download "${release_tag}" -R openai/codex -p "$1" -O "$2" --clobber
+        }
+        fetch "${checksums_name}" "${checksums_path}"
         # Check the original manifest bytes even when either checksum file uses CRLF.
         expected_manifest_checksum="$(grep -F "  ${checksums_name}" "${trusted_checksums}" | cut -d ' ' -f 1)"
         actual_manifest_checksum="$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "${checksums_path}")"
@@ -50,8 +57,8 @@ runs:
           echo "Checksum mismatch for ${checksums_name}: expected ${expected_manifest_checksum}, got ${actual_manifest_checksum}" >&2
           exit 1
         fi
-        curl -fsSL "${base_url}/${archive_name}" -o "${archive_path}"
-        curl -fsSL "${base_url}/${binding_name}" -o "${binding_path}"
+        fetch "${archive_name}" "${archive_path}"
+        fetch "${binding_name}" "${binding_path}"
 
         if [[ "$(wc -l < "${checksums_path}")" -ne 2 ]]; then
           echo "Expected exactly two checksums for ${TARGET} in ${checksums_path}" >&2
