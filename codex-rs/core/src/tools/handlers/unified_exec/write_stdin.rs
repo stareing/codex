@@ -79,9 +79,14 @@ impl WriteStdinHandler {
         };
 
         let args: WriteStdinArgs = parse_arguments(&arguments)?;
+        // The process runs where the primary environment is (write_stdin has no environment of its own).
+        let runs_here = step_context
+            .environments
+            .primary()
+            .is_some_and(|environment| !environment.environment.is_remote());
         let context =
             UnifiedExecContext::new(session.clone(), step_context, cancellation_token, call_id);
-        let response = session
+        let mut response = session
             .services
             .unified_exec_manager
             .write_stdin(
@@ -117,6 +122,17 @@ impl WriteStdinHandler {
                 FunctionCallError::RespondToModel(message)
             })?;
 
+        if runs_here {
+            crate::unified_exec::saved_output::save_if_truncated(
+                &mut response,
+                crate::unified_exec::saved_output::thread_dir(
+                    &std::env::temp_dir(),
+                    session.thread_id(),
+                ),
+                &context.call_id,
+            )
+            .await;
+        }
         Ok(boxed_tool_output(response))
     }
 }

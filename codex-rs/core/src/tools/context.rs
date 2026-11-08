@@ -391,6 +391,15 @@ pub struct ExecCommandToolOutput {
     /// Bytes omitted by the output collection cap before model-facing truncation.
     pub output_omitted_bytes: Option<NonZeroUsize>,
     pub hook_command: Option<String>,
+    /// Where the whole collected output was saved because the model's copy is cut (`saved_output.rs`).
+    pub saved_output: Option<SavedOutput>,
+}
+
+/// The full output of a command whose model-facing copy is truncated, saved for the model to Read or Grep.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedOutput {
+    pub path: String,
+    pub bytes: usize,
 }
 
 impl ToolOutput for ExecCommandToolOutput {
@@ -479,6 +488,12 @@ impl ToolOutput for ExecCommandToolOutput {
 }
 
 impl ExecCommandToolOutput {
+    /// Whether the model's copy of the output will be cut.
+    pub(crate) fn will_be_truncated(&self) -> bool {
+        self.output_omitted_bytes.is_some()
+            || self.raw_output.len() > self.model_output_policy().byte_budget()
+    }
+
     fn model_output_policy(&self) -> TruncationPolicy {
         let requested_policy = TruncationPolicy::Tokens(resolve_max_tokens(self.max_output_tokens));
         if requested_policy.byte_budget() < self.truncation_policy.byte_budget() {
@@ -541,6 +556,13 @@ impl ExecCommandToolOutput {
 
         if let Some(original_token_count) = self.original_token_count {
             sections.push(format!("Original token count: {original_token_count}"));
+        }
+
+        if let Some(saved) = &self.saved_output {
+            sections.push(format!(
+                "Output was truncated below; all {} bytes collected are saved in {} (use Read with offset/limit or Grep on it instead of re-running the command)",
+                saved.bytes, saved.path
+            ));
         }
 
         sections.push("Output:".to_string());

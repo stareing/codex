@@ -829,6 +829,7 @@ impl UnifiedExecProcessManager {
         };
 
         let response = ExecCommandToolOutput {
+            saved_output: None,
             event_call_id: context.call_id.clone(),
             chunk_id,
             wall_time,
@@ -1097,6 +1098,7 @@ impl UnifiedExecProcessManager {
         };
 
         let response = ExecCommandToolOutput {
+            saved_output: None,
             event_call_id,
             chunk_id,
             wall_time,

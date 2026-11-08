@@ -197,7 +197,7 @@ async fn tool_call_output_exceeds_limit_truncated_chars_limit() -> Result<()> {
         "expected truncated shell output to be plain text"
     );
 
-    let truncated_pattern = r#"(?s)^Chunk ID: [^\n]+\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\nOriginal token count: \d+\nOutput:\nWarning: truncated output \(original token count: \d+\)\nTotal output lines: 100000\n\n.*?…\d+ chars truncated….*$"#;
+    let truncated_pattern = r#"(?s)^Chunk ID: [^\n]+\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\nOriginal token count: \d+\n(?:Output was truncated below[^\n]*\n)?Output:\nWarning: truncated output \(original token count: \d+\)\nTotal output lines: 100000\n\n.*?…\d+ chars truncated….*$"#;
 
     assert_regex_match(truncated_pattern, &output);
 
@@ -276,7 +276,7 @@ async fn tool_call_output_exceeds_limit_truncated_for_model() -> Result<()> {
 Wall time: [0-9]+(?:\.[0-9]+)? seconds
 Process exited with code 0
 Original token count: \d+
-Output:
+(?:Output was truncated below[^\n]*\n)?Output:
 Warning: truncated output \(original token count: \d+\)
 Total output lines: 100000
 
@@ -635,7 +635,7 @@ async fn token_policy_marker_reports_tokens() -> Result<()> {
         .function_call_output_text(call_id)
         .context("shell output present")?;
 
-    let pattern = r"(?s)^Chunk ID: [^\n]+\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\nOriginal token count: \d+\nOutput:\nWarning: truncated output \(original token count: \d+\)\nTotal output lines: 150\n\n1\n2\n3\n.*…\d+ tokens truncated….*149\n150\n$";
+    let pattern = r"(?s)^Chunk ID: [^\n]+\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\nOriginal token count: \d+\n(?:Output was truncated below[^\n]*\n)?Output:\nWarning: truncated output \(original token count: \d+\)\nTotal output lines: 150\n\n1\n2\n3\n.*…\d+ tokens truncated….*149\n150\n$";
 
     assert_regex_match(pattern, &output);
     assert_eq!(output.matches("tokens truncated").count(), 1);
@@ -688,7 +688,7 @@ async fn byte_policy_marker_reports_bytes() -> Result<()> {
         .function_call_output_text(call_id)
         .context("shell output present")?;
 
-    let pattern = r"(?s)^Chunk ID: [^\n]+\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\nOriginal token count: \d+\nOutput:\nWarning: truncated output \(original token count: \d+\)\nTotal output lines: 150\n\n1\n2\n3\n.*…\d+ chars truncated….*149\n150\n$";
+    let pattern = r"(?s)^Chunk ID: [^\n]+\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0\nOriginal token count: \d+\n(?:Output was truncated below[^\n]*\n)?Output:\nWarning: truncated output \(original token count: \d+\)\nTotal output lines: 150\n\n1\n2\n3\n.*…\d+ chars truncated….*149\n150\n$";
 
     assert_regex_match(pattern, &output);
     assert_eq!(output.matches("chars truncated").count(), 1);

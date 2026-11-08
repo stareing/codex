@@ -54,6 +54,7 @@ mod oneshot;
 mod process;
 mod process_manager;
 mod process_state;
+pub(crate) mod saved_output;
 mod shell_snapshot;
 mod stdin_approval;
 

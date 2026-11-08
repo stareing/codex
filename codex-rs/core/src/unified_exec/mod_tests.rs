@@ -204,6 +204,7 @@ async fn exec_command_with_tty(
     }
 
     Ok(ExecCommandToolOutput {
+        saved_output: None,
         event_call_id: context.call_id,
         chunk_id: generate_chunk_id(),
         wall_time,

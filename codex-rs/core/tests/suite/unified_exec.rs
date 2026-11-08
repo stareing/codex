@@ -84,6 +84,8 @@ struct ParsedUnifiedExecOutput {
     process_id: Option<String>,
     exit_code: Option<i32>,
     original_token_count: Option<usize>,
+    /// Where the whole output was saved when the model's copy is cut.
+    saved_output: Option<String>,
     output: String,
 }
 
@@ -97,6 +99,7 @@ fn parse_unified_exec_output(raw: &str) -> Result<ParsedUnifiedExecOutput> {
             r#"(?:Process exited with code (?P<exit_code>-?\d+)\n)?"#,
             r#"(?:Process running with session ID (?P<process_id>-?\d+)\n)?"#,
             r#"(?:Original token count: (?P<original_token_count>\d+)\n)?"#,
+            r#"(?:Output was truncated below; all \d+ bytes collected are saved in (?P<saved_output>[^\n]+?) \(use Read[^\n]*\n)?"#,
             r#"Output:\n?(?P<output>.*)$"#,
         ))
         .expect("valid unified exec output regex")
@@ -154,6 +157,9 @@ fn parse_unified_exec_output(raw: &str) -> Result<ParsedUnifiedExecOutput> {
         process_id,
         exit_code,
         original_token_count,
+        saved_output: captures
+            .name("saved_output")
+            .map(|value| value.as_str().to_string()),
         output,
     })
 }
@@ -2070,6 +2076,11 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
         &output_text,
     );
     assert_eq!(output_text.matches("tokens truncated").count(), 1);
+    // The whole output is kept on disk for the model to Read or Grep.
+    let saved = output.saved_output.expect("the cut output was saved");
+    let full = std::fs::read_to_string(&saved)?.replace("\r\n", "\n");
+    assert_eq!(full.lines().count(), 999, "{saved}");
+    assert!(full.contains("EXEC-LINE-0500"), "{saved}");
 
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
