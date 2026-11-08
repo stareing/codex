@@ -21473,6 +21473,13 @@
       "ThreadCompactStartParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
+          "instructions": {
+            "description": "What the summary should focus on (`/compact <instructions>`); appended to the summarization prompt.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "threadId": {
             "type": "string"
           }
