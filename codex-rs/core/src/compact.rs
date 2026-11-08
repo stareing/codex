@@ -268,9 +268,10 @@ async fn run_compact_task_inner_impl(
     let mut client_session = sess.services.model_client.new_session();
     let compaction_response = loop {
         // Clone is required because of the loop
+        // Images are left out (`[image]`): the summary only needs to know they were there.
         let mut turn_input = history
             .clone()
-            .for_prompt(&turn_context.model_info().input_modalities);
+            .for_compaction_prompt(&turn_context.model_info().input_modalities);
         sess.services
             .executed_tool_calls
             .attach_to_compaction_prompt(&mut turn_input);

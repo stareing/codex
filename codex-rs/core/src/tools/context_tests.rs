@@ -557,3 +557,29 @@ fn exec_command_tool_output_preserves_omission_metadata_when_truncated() {
     assert!(text.contains("Warning: truncated output (original token count: 42000)"));
     assert_eq!(text.matches(&marker).count(), 1);
 }
+
+#[test]
+fn exec_command_tool_output_says_when_exit_code_one_is_an_answer() {
+    let output = |command: &str| ExecCommandToolOutput {
+        saved_output: None,
+        event_call_id: "call-1".to_string(),
+        chunk_id: String::new(),
+        wall_time: std::time::Duration::ZERO,
+        raw_output: Vec::new(),
+        truncation_policy: TruncationPolicy::Tokens(10_000),
+        max_output_tokens: None,
+        process_id: None,
+        exit_code: Some(1),
+        original_token_count: None,
+        output_omitted_bytes: None,
+        hook_command: Some(command.to_string()),
+    };
+    assert!(output("rg needle").log_output().contains(
+        "Process exited with code 1 (rg: no matches found; exit code 1 is not an error here)\n"
+    ));
+    assert!(
+        output("cargo build")
+            .log_output()
+            .contains("Process exited with code 1\n")
+    );
+}

@@ -13,6 +13,13 @@ impl UnsupportedMedia {
         content_kind: "images.unsupported",
     };
 
+    /// An image left out of a compaction request: the summary only needs to know one was there, and images
+    /// cost many tokens and can make the request itself too long.
+    pub(crate) const IMAGE_FOR_SUMMARY: Self = Self {
+        text: "[image]",
+        content_kind: "images.omitted_for_compaction",
+    };
+
     pub(crate) const AUDIO: Self = Self {
         text: "audio content omitted because you do not support audio input",
         content_kind: "audio.unsupported",

@@ -3291,3 +3291,62 @@ fn text_only_items_count_decoded_content() {
 
     assert_eq!(estimated, "Hello, \"world\"!\nこんにちは".len() as i64);
 }
+
+#[test]
+fn a_compaction_prompt_carries_no_images_even_for_a_model_that_reads_them() {
+    let image = || ImageReference::Inline {
+        image_url: "data:image/png;base64,AAAA".to_string(),
+    };
+    let history = create_history_with_items(vec![
+        ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![
+                ContentItem::InputText {
+                    text: "look".to_string(),
+                },
+                ContentItem::InputImage {
+                    image: image(),
+                    detail: Some(DEFAULT_IMAGE_DETAIL),
+                },
+            ],
+            phase: None,
+            internal_chat_message_metadata_passthrough: None,
+        },
+        ResponseItem::FunctionCall {
+            id: None,
+            name: "view_image".to_string(),
+            namespace: None,
+            arguments: "{}".to_string(),
+            call_id: "call-1".to_string(),
+            encrypted_function_args: None,
+            internal_chat_message_metadata_passthrough: None,
+        },
+        ResponseItem::FunctionCallOutput {
+            id: None,
+            call_id: Some("call-1".to_string()),
+            name: None,
+            namespace: None,
+            output: FunctionCallOutputPayload::from_content_items(vec![
+                FunctionCallOutputContentItem::InputImage {
+                    image: image(),
+                    detail: Some(DEFAULT_IMAGE_DETAIL),
+                },
+            ]),
+            internal_chat_message_metadata_passthrough: None,
+        },
+    ]);
+    let modalities = [InputModality::Text, InputModality::Image];
+
+    let normal = serde_json::to_string(&history.clone().for_prompt(&modalities)).expect("json");
+    assert!(
+        normal.contains("data:image/png"),
+        "a normal turn keeps them"
+    );
+
+    let compaction =
+        serde_json::to_string(&history.for_compaction_prompt(&modalities)).expect("json");
+    assert!(!compaction.contains("data:image/png"), "{compaction}");
+    assert_eq!(compaction.matches("[image]").count(), 2, "{compaction}");
+    assert!(compaction.contains("look"), "{compaction}");
+}

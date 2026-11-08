@@ -533,6 +533,22 @@ impl ContextManager {
             .collect()
     }
 
+    /// The history as a compaction request sends it: normalized, with every image replaced by `[image]`.
+    pub(crate) fn for_compaction_prompt(
+        self,
+        input_modalities: &[InputModality],
+    ) -> Vec<ResponseItem> {
+        let mut items = self.for_prompt_annotated(input_modalities);
+        normalize::replace_images(
+            &mut items,
+            crate::context::UnsupportedMedia::IMAGE_FOR_SUMMARY,
+        );
+        items
+            .into_iter()
+            .map(ResponseItemEnvelope::into_item)
+            .collect()
+    }
+
     /// Returns normalized history envelopes for internal consumers that must retain metadata.
     pub(crate) fn for_prompt_annotated(
         mut self,

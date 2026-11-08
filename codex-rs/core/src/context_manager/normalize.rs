@@ -335,7 +335,11 @@ pub(crate) fn strip_images_when_unsupported(
     if supports_images {
         return;
     }
+    replace_images(items, UnsupportedMedia::IMAGE);
+}
 
+/// Replaces every image in messages and tool outputs with `placeholder`'s text, and drops generated images.
+pub(crate) fn replace_images(items: &mut [ResponseItemEnvelope], placeholder: UnsupportedMedia) {
     for envelope in items.iter_mut() {
         match &mut envelope.item {
             ResponseItem::Message { .. } => {
@@ -344,7 +348,7 @@ pub(crate) fn strip_images_when_unsupported(
                 };
                 for content_item in &mut content {
                     if matches!(content_item.content(), ContentItem::InputImage { .. }) {
-                        *content_item = UnsupportedMedia::IMAGE.render_fragment().into_parts().1;
+                        *content_item = placeholder.render_fragment().into_parts().1;
                     }
                 }
                 let _ = set_annotated_content(&mut envelope.item, content);
@@ -358,7 +362,7 @@ pub(crate) fn strip_images_when_unsupported(
                             FunctionCallOutputContentItem::InputImage { .. } => {
                                 normalized_content_items.push(
                                     FunctionCallOutputContentItem::InputText {
-                                        text: UnsupportedMedia::IMAGE.render(),
+                                        text: placeholder.render(),
                                     },
                                 );
                             }

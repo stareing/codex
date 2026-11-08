@@ -547,7 +547,15 @@ impl ExecCommandToolOutput {
         sections.push(format!("Wall time: {wall_time_seconds:.4} seconds"));
 
         if let Some(exit_code) = self.exit_code {
-            sections.push(format!("Process exited with code {exit_code}"));
+            let note = self.hook_command.as_deref().and_then(|command| {
+                crate::tools::exit_code_meaning::exit_code_note(command, exit_code)
+            });
+            match note {
+                Some(note) => {
+                    sections.push(format!("Process exited with code {exit_code} ({note})"))
+                }
+                None => sections.push(format!("Process exited with code {exit_code}")),
+            }
         }
 
         if let Some(process_id) = &self.process_id {
