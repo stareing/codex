@@ -15,7 +15,7 @@ async fn foreground_update_respects_consent_and_reports_unconfirmed() -> anyhow:
         ("analytics.enabled = true\n", false, 1),
         ("analytics.enabled = false\n", true, 0),
     ] {
-        let codex = codex_utils_cargo_bin::cargo_bin("codex")?;
+        let codex = codex_utils_cargo_bin::cargo_bin("onigio-agent")?;
         let server = MockServer::start().await;
         Mock::given(wiremock::matchers::path("/metrics"))
             .respond_with(ResponseTemplate::new(200))

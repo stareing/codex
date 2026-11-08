@@ -32,7 +32,7 @@ pub(super) async fn run_main_inner(
         }
         if cli.fork_picker || cli.fork_last {
             return Err(std::io::Error::other(
-                "`codex fork --worktree` requires an explicit session ID",
+                "`onigio-agent fork --worktree` requires an explicit session ID",
             ));
         }
     }

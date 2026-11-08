@@ -45,7 +45,7 @@ impl Fixture {
         let program = root
             .path()
             .join(format!("codex{}", std::env::consts::EXE_SUFFIX));
-        let source = codex_utils_cargo_bin::cargo_bin("codex")?;
+        let source = codex_utils_cargo_bin::cargo_bin("onigio-agent")?;
         // Hard-link setup and teardown invalidate other tests' Rosetta translations.
         #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
         {

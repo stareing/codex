@@ -431,7 +431,8 @@ async fn build_report(
                     })
                 },
                 async {
-                    run_sync_check("auth", progress.clone(), || match &auth_manager_result {
+                    run_sync_check("auth", progress.clone(), || {
+                        match &auth_manager_result {
                         Ok(_) => auth_check(config),
                         Err(error) => DoctorCheck::new(
                             "auth.load",
@@ -441,8 +442,9 @@ async fn build_report(
                         )
                         .detail(error.to_string())
                         .remediation(
-                            "Fix the reported authentication error, then rerun codex doctor.",
+                            "Fix the reported authentication error, then rerun onigio-agent doctor.",
                         ),
+                    }
                     })
                 },
                 run_async_check("updates", progress.clone(), updates_check(config)),
@@ -532,7 +534,9 @@ async fn build_report(
                             CheckStatus::Fail,
                             "config could not be loaded",
                         )
-                        .remediation("Fix the reported config error, then rerun codex doctor.");
+                        .remediation(
+                            "Fix the reported config error, then rerun onigio-agent doctor.",
+                        );
                         // Error messages can echo config values. Report only typed metadata,
                         // including errors wrapped by io::Error, whose source skips the wrapper.
                         let config_error = err.chain().find_map(|cause| {
@@ -1091,7 +1095,7 @@ fn display_list<T: AsRef<str>>(items: &[T]) -> String {
 }
 
 fn codex_path_entries() -> Vec<String> {
-    let Ok(candidates) = which::which_all("codex") else {
+    let Ok(candidates) = which::which_all("onigio-agent") else {
         return Vec::new();
     };
     let mut seen = BTreeSet::new();
@@ -1272,8 +1276,9 @@ fn auth_check(config: &Config) -> DoctorCheck {
             let mut check =
                 DoctorCheck::new("auth.credentials", "auth", status, summary).details(details);
             if status == CheckStatus::Fail {
-                check =
-                    check.remediation("Run codex login again or provide a supported auth env var.");
+                check = check.remediation(
+                    "Run onigio-agent login again or provide a supported auth env var.",
+                );
             }
             check
         }
@@ -1291,7 +1296,9 @@ fn auth_check(config: &Config) -> DoctorCheck {
             "no Codex credentials were found",
         )
         .details(details)
-        .remediation("Run codex login or provide an API key through a supported auth env var."),
+        .remediation(
+            "Run onigio-agent login or provide an API key through a supported auth env var.",
+        ),
         Err(err) => DoctorCheck::new(
             "auth.credentials",
             "auth",
@@ -1299,7 +1306,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
             "stored credentials could not be read",
         )
         .detail(err.to_string())
-        .remediation("Fix auth storage access or run codex login again."),
+        .remediation("Fix auth storage access or run onigio-agent login again."),
     }
 }
 

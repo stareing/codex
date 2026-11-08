@@ -53,7 +53,7 @@ pub(super) struct ExecServerProcess {
 impl ExecServerProcess {
     pub(super) async fn start() -> Result<Self> {
         let codex_home = TempDir::new()?;
-        let mut child = Command::new(codex_utils_cargo_bin::cargo_bin("codex")?)
+        let mut child = Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?)
             .args(["exec-server", "--listen", "ws://127.0.0.1:0"])
             .env("CODEX_HOME", codex_home.path())
             .stdin(Stdio::null())
