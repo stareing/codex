@@ -47,6 +47,13 @@ async fn edit_replaces_the_exact_string_and_the_model_sees_the_file_tools() -> R
     harness
         .write_file("notes.txt", "alpha\nbeta\ngamma\n")
         .await?;
+    call(
+        &harness,
+        "read-0",
+        "Read",
+        json!({ "file_path": "notes.txt" }),
+    )
+    .await?;
 
     call(
         &harness,
@@ -76,6 +83,13 @@ async fn edit_refuses_an_ambiguous_string_and_leaves_the_file() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let harness = harness().await?;
     harness.write_file("twice.txt", "x\nx\n").await?;
+    call(
+        &harness,
+        "read-0",
+        "Read",
+        json!({ "file_path": "twice.txt" }),
+    )
+    .await?;
 
     let output = call(
         &harness,
@@ -107,6 +121,84 @@ async fn write_creates_a_file_with_its_folders() -> Result<()> {
         harness.read_file_text("docs/md-test.md").await?,
         "# Title\n\n```mermaid\ngraph TD; A-->B\n```\n"
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn changing_a_file_needs_a_read_of_what_is_on_disk_now() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let harness = harness().await?;
+    harness.write_file("cfg.txt", "port = 1\n").await?;
+    let edit = json!({ "file_path": "cfg.txt", "old_string": "1", "new_string": "2" });
+
+    let unread = call(&harness, "edit-unread", "Edit", edit.clone()).await?;
+    assert!(unread.contains("Read it first"), "{unread}");
+    let overwrite = call(
+        &harness,
+        "write-unread",
+        "Write",
+        json!({ "file_path": "cfg.txt", "content": "gone\n" }),
+    )
+    .await?;
+    assert!(overwrite.contains("Read it first"), "{overwrite}");
+
+    call(
+        &harness,
+        "read-1",
+        "Read",
+        json!({ "file_path": "cfg.txt" }),
+    )
+    .await?;
+    harness
+        .write_file("cfg.txt", "port = 1 # by the user\n")
+        .await?;
+    let stale = call(&harness, "edit-stale", "Edit", edit.clone()).await?;
+    assert!(stale.contains("changed since it was last read"), "{stale}");
+    assert_eq!(
+        harness.read_file_text("cfg.txt").await?,
+        "port = 1 # by the user\n"
+    );
+
+    call(
+        &harness,
+        "read-2",
+        "Read",
+        json!({ "file_path": "cfg.txt" }),
+    )
+    .await?;
+    call(&harness, "edit-ok", "Edit", edit).await?;
+    // Its own change counts as read: a second edit needs no new Read.
+    call(
+        &harness,
+        "edit-again",
+        "Edit",
+        json!({ "file_path": "cfg.txt", "old_string": "user", "new_string": "admin" }),
+    )
+    .await?;
+    assert_eq!(
+        harness.read_file_text("cfg.txt").await?,
+        "port = 2 # by the admin\n"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reading_the_same_unchanged_lines_again_returns_a_note() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let harness = harness().await?;
+    harness.write_file("same.txt", "one\ntwo\n").await?;
+    let args = json!({ "file_path": "same.txt" });
+
+    let first = call(&harness, "read-a", "Read", args.clone()).await?;
+    assert!(first.starts_with("     1\tone\n"), "{first}");
+    let again = call(&harness, "read-b", "Read", args.clone()).await?;
+    assert!(
+        again.contains("is unchanged since the last Read"),
+        "{again}"
+    );
+    harness.write_file("same.txt", "one\nTWO\n").await?;
+    let changed = call(&harness, "read-c", "Read", args).await?;
+    assert!(changed.contains("     2\tTWO"), "{changed}");
     Ok(())
 }
 

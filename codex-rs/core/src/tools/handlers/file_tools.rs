@@ -31,6 +31,9 @@ use crate::tools::handlers::apply_patch::apply_patch_file_update_mode;
 use crate::tools::handlers::apply_patch::execute_verified_patch;
 use crate::tools::handlers::file_access::Access;
 use crate::tools::handlers::file_access::ensure_access;
+use crate::tools::handlers::file_reads::FileKey;
+use crate::tools::handlers::file_reads::FileReadLedger;
+use crate::tools::handlers::file_reads::ReadOutcome;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::registry::CoreToolRuntime;
@@ -180,6 +183,13 @@ impl Target {
         .await
     }
 
+    fn key(&self) -> FileKey {
+        (
+            self.environment.selection.environment_id.clone(),
+            self.shown.clone(),
+        )
+    }
+
     fn sandbox(&self) -> FileSystemSandboxContext {
         self.environment
             .sandbox_context(/*additional_permissions*/ None)
@@ -219,6 +229,19 @@ impl Target {
             .map(Some)
             .map_err(|_| refuse(format!("`{}` is not UTF-8 text", self.shown)))
     }
+}
+
+fn lock_ledger(
+    session: &crate::session::session::Session,
+) -> std::sync::MutexGuard<'_, FileReadLedger> {
+    session
+        .file_reads
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn ledger(invocation: &ToolInvocation) -> std::sync::MutexGuard<'_, FileReadLedger> {
+    lock_ledger(&invocation.session)
 }
 
 /// Lines of `text` as the patch grammar sees them (no trailing empty line for a final newline).
@@ -281,6 +304,11 @@ pub(crate) fn replaced(
     } else {
         (old.to_string(), new.to_string())
     };
+    if !text.contains(old.as_str())
+        && let Some(result) = replaced_ignoring_quote_style(text, &old, &new, replace_all)
+    {
+        return result;
+    }
     match text.matches(old.as_str()).count() {
         0 => Err("old_string was not found in the file; Read it again and copy the text exactly (including whitespace and indentation)".to_string()),
         1 => Ok(text.replacen(old.as_str(), &new, 1)),
@@ -291,8 +319,107 @@ pub(crate) fn replaced(
     }
 }
 
-/// `Read`'s output: `cat -n` style numbered lines from `offset` (1-based).
-pub(crate) fn numbered(text: &str, offset: usize, limit: usize) -> String {
+/// Typographic quotes as their ASCII counterparts (one char for one char, so char positions line up).
+fn fold_quote(c: char) -> char {
+    match c {
+        '\u{2018}' | '\u{2019}' => '\'',
+        '\u{201C}' | '\u{201D}' => '"',
+        c => c,
+    }
+}
+
+/// The replacement when `old` only differs from the file in quote style (the model wrote `'`/`"` where the file has
+/// curly quotes, or the other way round); `None` when that does not find it either. `new` takes the curly quotes
+/// the matched text used.
+fn replaced_ignoring_quote_style(
+    text: &str,
+    old: &str,
+    new: &str,
+    replace_all: bool,
+) -> Option<Result<String, String>> {
+    let folded_old: String = old.chars().map(fold_quote).collect();
+    if folded_old == old && !text.chars().any(|c| fold_quote(c) != c) {
+        return None;
+    }
+    // Byte offsets of each char boundary in the folded text and in `text`.
+    let mut folded = String::with_capacity(text.len());
+    let mut boundaries: Vec<(usize, usize)> = Vec::with_capacity(text.len() + 1);
+    for (at, c) in text.char_indices() {
+        boundaries.push((folded.len(), at));
+        folded.push(fold_quote(c));
+    }
+    boundaries.push((folded.len(), text.len()));
+    let original_at = |folded_at: usize| {
+        boundaries
+            .binary_search_by_key(&folded_at, |(f, _)| *f)
+            .ok()
+            .map(|i| boundaries[i].1)
+    };
+    let ranges: Vec<(usize, usize)> = folded
+        .match_indices(folded_old.as_str())
+        .filter_map(|(at, m)| Some((original_at(at)?, original_at(at + m.len())?)))
+        .collect();
+    match ranges.len() {
+        0 => return None,
+        1 => {}
+        _ if replace_all => {}
+        n => {
+            return Some(Err(format!(
+                "old_string appears {n} times; include more surrounding lines to make it unique, or set replace_all to true"
+            )));
+        }
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for (start, end) in ranges {
+        out.push_str(&text[last..start]);
+        out.push_str(&with_quote_style_of(&text[start..end], new));
+        last = end;
+    }
+    out.push_str(&text[last..]);
+    Some(Ok(out))
+}
+
+/// `new` with its ASCII quotes made curly where `matched` (the file's text it replaces) uses curly ones: opening
+/// after a space or bracket or at the start, closing otherwise (an apostrophe is a closing single quote).
+fn with_quote_style_of(matched: &str, new: &str) -> String {
+    let curly_single = matched.contains(['\u{2018}', '\u{2019}']);
+    let curly_double = matched.contains(['\u{201C}', '\u{201D}']);
+    if !curly_single && !curly_double {
+        return new.to_string();
+    }
+    let mut out = String::with_capacity(new.len());
+    let mut previous: Option<char> = None;
+    for c in new.chars() {
+        let opens =
+            previous.is_none_or(|p| p.is_whitespace() || "([{<\u{2014}\u{2013}".contains(p));
+        let styled = match c {
+            '\'' if curly_single => {
+                if opens {
+                    '\u{2018}'
+                } else {
+                    '\u{2019}'
+                }
+            }
+            '"' if curly_double => {
+                if opens {
+                    '\u{201C}'
+                } else {
+                    '\u{201D}'
+                }
+            }
+            c => c,
+        };
+        out.push(styled);
+        previous = Some(c);
+    }
+    out
+}
+
+/// `Read`'s output: `cat -n` style numbered lines from `offset` (1-based), at most `max_bytes` of them (whole lines,
+/// at least one): the history would otherwise cut the middle out of a long read and the model would never know
+/// which lines it lost.
+pub(crate) fn numbered(text: &str, offset: usize, limit: usize, max_bytes: usize) -> String {
     let lines = patch_lines(text);
     if lines.is_empty() {
         return "(the file is empty)".to_string();
@@ -305,15 +432,25 @@ pub(crate) fn numbered(text: &str, offset: usize, limit: usize) -> String {
         );
     }
     let mut out = String::new();
-    let end = (start - 1 + limit).min(lines.len());
+    let mut end = (start - 1 + limit).min(lines.len());
     for (index, line) in lines[start - 1..end].iter().enumerate() {
         let line = line.strip_suffix('\r').unwrap_or(line);
         let shown: String = line.chars().take(MAX_LINE_CHARS).collect();
-        out.push_str(&format!("{:>6}\t{shown}", start + index));
+        let mut row = format!("{:>6}\t{shown}", start + index);
         if shown.len() < line.len() {
-            out.push_str(" … (line cut)");
+            row.push_str(" … (line cut)");
         }
-        out.push('\n');
+        row.push('\n');
+        if index > 0 && out.len() + row.len() > max_bytes {
+            end = start - 1 + index;
+            out.push_str(&format!(
+                "(output size limit: showing lines {start}-{end} of {}; pass offset {} to read on, or Grep for what you need)\n",
+                lines.len(),
+                end + 1
+            ));
+            return out;
+        }
+        out.push_str(&row);
     }
     if end < lines.len() {
         out.push_str(&format!(
@@ -506,8 +643,24 @@ impl ToolExecutor<ToolInvocation> for ReadFileHandler {
             let Some(text) = target.read_text(fs.as_ref()).await? else {
                 return Err(refuse(format!("`{}` does not exist", target.shown)));
             };
+            let offset = args.offset.unwrap_or(1).max(1);
             let limit = args.limit.filter(|l| *l > 0).unwrap_or(DEFAULT_READ_LINES);
-            let body = numbered(&text, args.offset.unwrap_or(1), limit);
+            if ledger(&invocation).read(target.key(), &text, offset, limit)
+                == ReadOutcome::Unchanged
+            {
+                return Ok(boxed_tool_output(FunctionToolOutput::from_text(
+                    format!(
+                        "`{}` is unchanged since the last Read of these lines in this conversation; that output is still above, use it instead of reading again",
+                        target.shown
+                    ),
+                    Some(true),
+                )));
+            }
+            let budget = codex_protocol::protocol::TruncationPolicy::from(
+                invocation.turn.model_info().truncation_policy,
+            )
+            .byte_budget();
+            let body = numbered(&text, offset, limit, budget);
             Ok(boxed_tool_output(FunctionToolOutput::from_text(
                 body,
                 Some(true),
@@ -577,10 +730,17 @@ impl ToolExecutor<ToolInvocation> for EditFileHandler {
                     target.shown
                 )));
             };
+            let key = target.key();
+            ledger(&invocation)
+                .may_change(&key, Some(&text))
+                .map_err(|stale| refuse(format!("Edit: {}", stale.message(&target.shown))))?;
             let next = replaced(&text, &args.old_string, &args.new_string, args.replace_all)
                 .map_err(|reason| refuse(format!("Edit `{}`: {reason}", target.shown)))?;
             let patch = whole_file_patch(&args.file_path, Some(&text), &next);
-            apply_generated_patch(invocation, target, patch).await
+            let session = Arc::clone(&invocation.session);
+            let output = apply_generated_patch(invocation, target, patch).await?;
+            lock_ledger(&session).wrote(key, &next);
+            Ok(output)
         })
     }
 }
@@ -594,7 +754,7 @@ impl ToolExecutor<ToolInvocation> for WriteFileHandler {
         function_tool(
             WRITE_TOOL_NAME,
             "Creates a file, or replaces the whole of an existing one, with `content` (parent folders are created). \
-             Prefer Edit for changing part of an existing file.",
+             Prefer Edit for changing part of an existing file. To replace an existing file, Read it first.",
             properties(
                 vec![
                     (
@@ -639,8 +799,15 @@ impl ToolExecutor<ToolInvocation> for WriteFileHandler {
                     Some(true),
                 )));
             }
+            let key = target.key();
+            ledger(&invocation)
+                .may_change(&key, old.as_deref())
+                .map_err(|stale| refuse(format!("Write: {}", stale.message(&target.shown))))?;
             let patch = whole_file_patch(&args.file_path, old.as_deref(), &args.content);
-            apply_generated_patch(invocation, target, patch).await
+            let session = Arc::clone(&invocation.session);
+            let output = apply_generated_patch(invocation, target, patch).await?;
+            lock_ledger(&session).wrote(key, &args.content);
+            Ok(output)
         })
     }
 }

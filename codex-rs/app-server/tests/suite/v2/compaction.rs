@@ -353,7 +353,10 @@ async fn thread_compact_start_triggers_compaction_and_returns_empty_response() -
     let ThreadItem::ContextCompaction { id: started_id, .. } = started.item else {
         unreachable!("started item should be context compaction");
     };
-    let ThreadItem::ContextCompaction { id: completed_id, .. } = completed.item else {
+    let ThreadItem::ContextCompaction {
+        id: completed_id, ..
+    } = completed.item
+    else {
         unreachable!("completed item should be context compaction");
     };
 

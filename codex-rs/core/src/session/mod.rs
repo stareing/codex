@@ -4078,6 +4078,11 @@ impl Session {
         for envelope in &mut items {
             Self::assign_missing_response_item_id(&mut envelope.item);
         }
+        // The files read before are no longer in the model's context.
+        self.file_reads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         let mcp_revision = self
             .services
             .executed_tool_calls

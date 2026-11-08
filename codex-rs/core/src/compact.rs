@@ -404,7 +404,8 @@ async fn run_compact_task_inner_impl(
         .store(0, std::sync::atomic::Ordering::Relaxed);
 
     // The completed item carries the summary so clients can show what the history was replaced with.
-    let compaction_item = TurnItem::ContextCompaction(compaction.with_summary(summary_suffix.clone()));
+    let compaction_item =
+        TurnItem::ContextCompaction(compaction.with_summary(summary_suffix.clone()));
     sess.emit_turn_item_completed(&turn_context, compaction_item)
         .await;
     let warning = EventMsg::Warning(WarningEvent {
@@ -595,7 +596,9 @@ pub(crate) const MID_TURN_CONTINUATION: &str = "The conversation was compacted w
 /// instruction to carry on.
 pub(crate) fn summary_message(summary: &str, phase: CompactionPhase) -> String {
     match phase {
-        CompactionPhase::MidTurn => format!("{SUMMARY_PREFIX}\n{summary}\n\n{MID_TURN_CONTINUATION}"),
+        CompactionPhase::MidTurn => {
+            format!("{SUMMARY_PREFIX}\n{summary}\n\n{MID_TURN_CONTINUATION}")
+        }
         CompactionPhase::StandaloneTurn | CompactionPhase::PreTurn | CompactionPhase::PostTurn => {
             format!("{SUMMARY_PREFIX}\n{summary}")
         }
@@ -633,7 +636,11 @@ pub(crate) fn summary_from_compaction_answer(answer: &str) -> String {
     }
     let without_analysis = match (answer.find(ANALYSIS_OPEN), answer.find(ANALYSIS_CLOSE)) {
         (Some(start), Some(end)) if end > start => {
-            format!("{}{}", &answer[..start], &answer[end + ANALYSIS_CLOSE.len()..])
+            format!(
+                "{}{}",
+                &answer[..start],
+                &answer[end + ANALYSIS_CLOSE.len()..]
+            )
         }
         _ => answer.to_string(),
     };

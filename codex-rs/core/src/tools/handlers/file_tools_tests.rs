@@ -55,15 +55,64 @@ fn replacing_follows_the_files_crlf_endings() {
 #[test]
 fn read_numbers_lines_and_pages() {
     assert_eq!(
-        numbered("a\nb\r\nc\n", 1, 2000),
+        numbered("a\nb\r\nc\n", 1, 2000, 10_000),
         "     1\ta\n     2\tb\n     3\tc\n"
     );
     assert_eq!(
-        numbered("a\nb\nc", 2, 1),
+        numbered("a\nb\nc", 2, 1, 10_000),
         "     2\tb\n(showing lines 2-2 of 3; pass offset 3 to read on)\n"
     );
-    assert_eq!(numbered("", 1, 10), "(the file is empty)");
-    assert!(numbered("a\n", 5, 10).contains("past the end"));
+    assert_eq!(numbered("", 1, 10, 10_000), "(the file is empty)");
+    assert!(numbered("a\n", 5, 10, 10_000).contains("past the end"));
     let long = "x".repeat(MAX_LINE_CHARS + 5);
-    assert!(numbered(&long, 1, 1).ends_with(" … (line cut)\n"));
+    assert!(numbered(&long, 1, 1, 10_000).ends_with(" … (line cut)\n"));
+}
+
+#[test]
+fn read_stops_at_a_whole_line_within_the_size_limit() {
+    let text: String = (1..=100).map(|n| format!("line {n}\n")).collect();
+    let out = numbered(&text, 1, 2000, 60);
+    assert!(out.starts_with("     1\tline 1\n"), "{out}");
+    assert!(
+        out.ends_with("(output size limit: showing lines 1-3 of 100; pass offset 4 to read on, or Grep for what you need)\n"),
+        "{out}"
+    );
+    // One line is always shown, however long.
+    let one = numbered(&"y".repeat(500), 1, 2000, 10);
+    assert!(one.starts_with("     1\tyyy"), "{one}");
+}
+
+#[test]
+fn replacing_tolerates_quote_style_and_keeps_the_files_quotes() {
+    let file = "say \u{201C}hi\u{201D} and don\u{2019}t stop\n";
+    assert_eq!(
+        replaced(
+            file,
+            "say \"hi\" and don't",
+            "say \"hello\" and can't",
+            false
+        ),
+        Ok("say \u{201C}hello\u{201D} and can\u{2019}t stop\n".to_string())
+    );
+    // Straight quotes in the file, curly ones from the model: the file's straight style wins.
+    assert_eq!(
+        replaced(
+            "it's \"x\"\n",
+            "it\u{2019}s \u{201C}x\u{201D}",
+            "it's \"y\"",
+            false
+        ),
+        Ok("it's \"y\"\n".to_string())
+    );
+    let twice = replaced("\u{2018}a\u{2019} \u{2018}a\u{2019}", "'a'", "'b'", false).unwrap_err();
+    assert!(twice.contains("appears 2 times"), "{twice}");
+    assert_eq!(
+        replaced("\u{2018}a\u{2019} \u{2018}a\u{2019}", "'a'", "'b'", true),
+        Ok("\u{2018}b\u{2019} \u{2018}b\u{2019}".to_string())
+    );
+    assert!(
+        replaced("plain", "'q'", "x", false)
+            .unwrap_err()
+            .contains("not found")
+    );
 }

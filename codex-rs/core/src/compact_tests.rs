@@ -703,7 +703,8 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_compaction_last
 
 #[test]
 fn compaction_answer_keeps_only_the_summary_block() {
-    let answer = "<analysis>\nwalked through it\n</analysis>\n\n<summary>\n1. Goal: ship it\n</summary>\n";
+    let answer =
+        "<analysis>\nwalked through it\n</analysis>\n\n<summary>\n1. Goal: ship it\n</summary>\n";
     assert_eq!(summary_from_compaction_answer(answer), "1. Goal: ship it");
 }
 
@@ -713,7 +714,10 @@ fn compaction_answer_without_summary_tags_drops_only_the_analysis() {
         summary_from_compaction_answer("<analysis>draft</analysis>\nGoal: ship it\n"),
         "Goal: ship it"
     );
-    assert_eq!(summary_from_compaction_answer("  plain handoff  "), "plain handoff");
+    assert_eq!(
+        summary_from_compaction_answer("  plain handoff  "),
+        "plain handoff"
+    );
     // An unclosed summary (cut off by the output limit) keeps what was written.
     assert_eq!(
         summary_from_compaction_answer("<analysis>x</analysis><summary>1. Goal: ship"),
@@ -740,7 +744,11 @@ fn only_a_mid_turn_summary_tells_the_model_to_carry_on() {
     let mid = summary_message("S", CompactionPhase::MidTurn);
     assert!(is_summary_message(&mid));
     assert!(mid.ends_with(MID_TURN_CONTINUATION), "{mid}");
-    for phase in [CompactionPhase::StandaloneTurn, CompactionPhase::PreTurn, CompactionPhase::PostTurn] {
+    for phase in [
+        CompactionPhase::StandaloneTurn,
+        CompactionPhase::PreTurn,
+        CompactionPhase::PostTurn,
+    ] {
         let text = summary_message("S", phase);
         assert!(is_summary_message(&text));
         assert_eq!(text, format!("{SUMMARY_PREFIX}\nS"));

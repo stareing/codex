@@ -76,12 +76,18 @@ fn rewind_response(report: &RewindReport) -> ThreadCheckpointRewindResponse {
 }
 
 /// The history folder of a thread (`<codex_home>/checkpoints/<thread id>`).
-pub(crate) fn checkpoint_dir(config: &Config, thread_id: ThreadId) -> Result<PathBuf, CheckpointError> {
+pub(crate) fn checkpoint_dir(
+    config: &Config,
+    thread_id: ThreadId,
+) -> Result<PathBuf, CheckpointError> {
     codex_checkpoint::thread_dir(config.codex_home.as_path(), &thread_id.to_string())
 }
 
 /// `turn/start` and `thread/revert` wait while a rewind of the thread runs.
-pub(crate) async fn ensure_no_restore(thread: &CodexThread, thread_id: ThreadId) -> Result<(), JSONRPCErrorError> {
+pub(crate) async fn ensure_no_restore(
+    thread: &CodexThread,
+    thread_id: ThreadId,
+) -> Result<(), JSONRPCErrorError> {
     let config = thread.config().await;
     match checkpoint_dir(&config, thread_id) {
         Ok(dir) if codex_checkpoint::restore_running(&dir) => {
@@ -96,7 +102,14 @@ impl ThreadRequestProcessor {
     async fn checkpoint_history(
         &self,
         thread_id: &str,
-    ) -> Result<(ThreadId, Arc<CodexThread>, Result<Arc<FileHistory>, CheckpointError>), JSONRPCErrorError> {
+    ) -> Result<
+        (
+            ThreadId,
+            Arc<CodexThread>,
+            Result<Arc<FileHistory>, CheckpointError>,
+        ),
+        JSONRPCErrorError,
+    > {
         let (thread_id, thread) = self.load_thread(thread_id).await?;
         let config = thread.config().await;
         if !config.checkpoint.enabled {
@@ -148,11 +161,16 @@ impl ThreadRequestProcessor {
         } = params;
         let notified_turn = turn_id.clone();
         let restored = self
-            .checkpoint_restore(&thread_id, dry_run, Some(notified_turn), move |history, timeout| {
-                history.rewind(&turn_id, dry_run, timeout)
-            })
+            .checkpoint_restore(
+                &thread_id,
+                dry_run,
+                Some(notified_turn),
+                move |history, timeout| history.rewind(&turn_id, dry_run, timeout),
+            )
             .await?;
-        Ok(Some(ClientResponsePayload::ThreadCheckpointRewindFiles(restored)))
+        Ok(Some(ClientResponsePayload::ThreadCheckpointRewindFiles(
+            restored,
+        )))
     }
 
     pub(crate) async fn thread_checkpoint_undo_rewind(
@@ -165,7 +183,9 @@ impl ThreadRequestProcessor {
                 history.undo_rewind(dry_run, timeout)
             })
             .await?;
-        Ok(Some(ClientResponsePayload::ThreadCheckpointUndoRewind(restored)))
+        Ok(Some(ClientResponsePayload::ThreadCheckpointUndoRewind(
+            restored,
+        )))
     }
 
     /// Runs a rewind or undo off the async threads; refuses while the thread runs a turn.
@@ -174,7 +194,9 @@ impl ThreadRequestProcessor {
         thread_id: &str,
         dry_run: bool,
         turn_id: Option<String>,
-        restore: impl FnOnce(&FileHistory, Duration) -> Result<RewindReport, CheckpointError> + Send + 'static,
+        restore: impl FnOnce(&FileHistory, Duration) -> Result<RewindReport, CheckpointError>
+        + Send
+        + 'static,
     ) -> Result<ThreadCheckpointRewindResponse, JSONRPCErrorError> {
         let (thread_id, thread, history) = self.checkpoint_history(thread_id).await?;
         let history = match history {
@@ -184,7 +206,11 @@ impl ThreadRequestProcessor {
         if matches!(thread.agent_status().await, AgentStatus::Running) {
             return Ok(refused(&CheckpointError::TurnInProgress));
         }
-        let timeout = if dry_run { PREVIEW_TIMEOUT } else { RESTORE_TIMEOUT };
+        let timeout = if dry_run {
+            PREVIEW_TIMEOUT
+        } else {
+            RESTORE_TIMEOUT
+        };
         let restored = tokio::task::spawn_blocking(move || restore(&history, timeout))
             .await
             .map_err(|err| internal_error(format!("checkpoint restore task failed: {err}")))?;

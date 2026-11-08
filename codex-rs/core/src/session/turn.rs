@@ -1488,15 +1488,22 @@ async fn run_auto_compact(
     .await;
     match &result {
         Ok(()) => sess.auto_compact_failures.store(0, Ordering::Relaxed),
-        Err(err) if matches!(err.details(), CodexErrorDetails::TurnAborted | CodexErrorDetails::Interrupted) => {}
+        Err(err)
+            if matches!(
+                err.details(),
+                CodexErrorDetails::TurnAborted | CodexErrorDetails::Interrupted
+            ) => {}
         Err(_) => {
             let failures = sess.auto_compact_failures.fetch_add(1, Ordering::Relaxed) + 1;
             if failures == AUTO_COMPACT_MAX_FAILURES {
                 let message = format!(
                     "Automatic compaction failed {AUTO_COMPACT_MAX_FAILURES} times in a row and is paused for this thread. Run /compact to try again, or start a new thread."
                 );
-                sess.send_event(turn_context.as_ref(), EventMsg::Warning(WarningEvent { message }))
-                    .await;
+                sess.send_event(
+                    turn_context.as_ref(),
+                    EventMsg::Warning(WarningEvent { message }),
+                )
+                .await;
             }
         }
     }

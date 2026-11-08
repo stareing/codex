@@ -97,6 +97,8 @@ pub(crate) struct Session {
     /// Automatic compactions that failed in a row; at `AUTO_COMPACT_MAX_FAILURES` automatic
     /// compaction stops trying until one succeeds (a manual `/compact` resets it).
     pub(crate) auto_compact_failures: std::sync::atomic::AtomicU32,
+    /// What the file tools have shown the model; cleared when the history is replaced.
+    pub(crate) file_reads: std::sync::Mutex<crate::tools::handlers::file_reads::FileReadLedger>,
 }
 
 #[derive(Clone)]
@@ -1796,6 +1798,7 @@ impl Session {
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
                 auto_compact_failures: std::sync::atomic::AtomicU32::new(0),
+            file_reads: std::sync::Mutex::default(),
             });
             if let Some(startup) = &startup {
                 let _ = startup.session.set(Arc::clone(&sess));
