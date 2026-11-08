@@ -47,6 +47,20 @@ pub(crate) struct LedgerEntry {
     /// Variables this install wrote to `$CODEX_HOME/.env` (secret header values), removed with it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) env_file: Vec<String>,
+    /// Set while the site has withdrawn the item (`sync-installed`): it is off until the site offers
+    /// it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) withdrawn: Option<Withdrawal>,
+}
+
+/// Why and since when the site withdrew an item, and whether it was on before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Withdrawal {
+    /// The site's `withdrawn_reason` (e.g. `version_yanked`).
+    pub(crate) reason: String,
+    pub(crate) since: String,
+    /// What `sync-installed` sets `enabled` back to when the site offers the item again.
+    pub(crate) enabled_before: bool,
 }
 
 impl LedgerEntry {

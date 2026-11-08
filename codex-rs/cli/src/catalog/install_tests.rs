@@ -192,6 +192,7 @@ fn listing_merges_this_computer_with_the_site() {
         enabled: false,
         trust: "reviewed".to_string(),
         env_file: Vec::new(),
+        withdrawn: None,
     });
     let site: Vec<SiteInstalled> = serde_json::from_value(serde_json::json!([
         {"ref": "store:mcp/ctx", "kind": "mcp", "slug": "ctx", "name": "Ctx",

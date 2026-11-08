@@ -15,6 +15,7 @@ pub(crate) fn entry(reference: &str, kind: Kind, slug: &str, name: &str) -> Ledg
         enabled: true,
         trust: "reviewed".to_string(),
         env_file: Vec::new(),
+        withdrawn: None,
     }
 }
 

@@ -471,6 +471,160 @@ async fn unequip_and_remove_an_mcp_server_and_list_what_is_left() {
     assert_eq!(err.code, "not_installed");
 }
 
+/// The site's `installed/` answer for context7 (MCP) and pdf (skill) with the given statuses.
+async fn mount_installed(server: &MockServer, context7: &str, pdf: &str, reason: &str) {
+    server.reset().await;
+    let row = |reference: &str, status: &str| {
+        let withdrawn = status == "withdrawn";
+        serde_json::json!({"ref": reference, "kind": "mcp", "status": status,
+                           "withdrawn_reason": withdrawn.then_some(reason)})
+    };
+    Mock::given(method("GET"))
+        .and(path("/api/agent-catalog/installed/"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": [
+                row("store:mcp/context7", context7), row("store:skill/pdf", pdf),
+            ]})),
+        )
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn sync_turns_withdrawn_items_off_and_restores_them_when_offered_again() {
+    let (server, home) = site().await;
+    mount_resolve(&server, "store:mcp/context7", &stdio_spec()).await;
+    mount_install(
+        &server,
+        "store:mcp/context7",
+        serde_json::json!({"spec": stdio_spec(), "installed_version": "1.2.0"}),
+    )
+    .await;
+    run_install(
+        home.path(),
+        "store:mcp/context7",
+        &mut ScriptedPrompter::default(),
+        InstallOptions {
+            yes: true,
+            env: [("CONTEXT7_API_KEY".to_string(), "k".to_string())].into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let mut ledger = Ledger::load(home.path()).unwrap();
+    let mut pdf = ledger.items[0].clone();
+    pdf.reference = "store:skill/pdf".to_string();
+    pdf.kind = crate::catalog::spec::Kind::Skill;
+    pdf.name = "pdf".to_string();
+    pdf.skill_name = Some("pdf-helper".to_string());
+    pdf.enabled = false;
+    ledger.upsert(pdf);
+    ledger.save(home.path()).unwrap();
+    let client = signed_in_client(home.path()).unwrap();
+    // `enabled = true` is the default and is left out of config.toml.
+    let enabled = |home: &Path| {
+        let server = config_toml(home)["mcp_servers"]["context7"].clone();
+        Some(
+            server
+                .get("enabled")
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(true),
+        )
+    };
+
+    // Offline: nothing changes.
+    Mock::given(method("GET"))
+        .and(path("/api/agent-catalog/installed/"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    assert!(sync::sync(home.path(), &client).await.is_err());
+    assert_eq!(enabled(home.path()), Some(true));
+    assert!(
+        Ledger::load(home.path())
+            .unwrap()
+            .items
+            .iter()
+            .all(|i| i.withdrawn.is_none())
+    );
+
+    // Withdrawn: off, and the site's own choice is not touched (no set-enabled call is mounted).
+    mount_installed(&server, "withdrawn", "withdrawn", "version_yanked").await;
+    let done = sync::sync(home.path(), &client).await.unwrap();
+    let actions: Vec<_> = done
+        .iter()
+        .map(|d| (d.reference.as_str(), d.action, d.enabled))
+        .collect();
+    assert_eq!(
+        actions,
+        vec![
+            ("store:mcp/context7", "withdrawn", false),
+            ("store:skill/pdf", "withdrawn", false)
+        ]
+    );
+    assert_eq!(enabled(home.path()), Some(false));
+    let held = Ledger::load(home.path()).unwrap();
+    let record = held.items[0].withdrawn.clone().unwrap();
+    assert_eq!(
+        (record.reason.as_str(), record.enabled_before),
+        ("version_yanked", true)
+    );
+    assert!(!held.items[1].withdrawn.as_ref().unwrap().enabled_before);
+    let err = install::set_enabled(home.path(), &client, "context7", true)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "withdrawn");
+    assert!(
+        sync::sync(home.path(), &client).await.unwrap().is_empty(),
+        "a second run changes nothing"
+    );
+    let (items, _) = install::list(home.path(), Some(&client)).await.unwrap();
+    assert_eq!(items[0].withdrawn_reason.as_deref(), Some("version_yanked"));
+
+    // A new reason is recorded; when it was first withdrawn is kept.
+    let since = record.since.clone();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    mount_installed(&server, "withdrawn", "withdrawn", "package_unavailable").await;
+    assert_eq!(sync::sync(home.path(), &client).await.unwrap().len(), 2);
+    let record = Ledger::load(home.path()).unwrap().items[0]
+        .withdrawn
+        .clone()
+        .unwrap();
+    assert_eq!(
+        (record.reason.as_str(), record.since),
+        ("package_unavailable", since)
+    );
+
+    // Offered again: back to what each was before.
+    mount_installed(&server, "available", "available", "").await;
+    let done = sync::sync(home.path(), &client).await.unwrap();
+    let actions: Vec<_> = done
+        .iter()
+        .map(|d| (d.reference.as_str(), d.action, d.enabled))
+        .collect();
+    assert_eq!(
+        actions,
+        vec![
+            ("store:mcp/context7", "restored", true),
+            ("store:skill/pdf", "restored", false)
+        ]
+    );
+    assert_eq!(enabled(home.path()), Some(true));
+    assert!(
+        Ledger::load(home.path())
+            .unwrap()
+            .items
+            .iter()
+            .all(|i| i.withdrawn.is_none())
+    );
+    let (items, _) = install::list(home.path(), Some(&client)).await.unwrap();
+    assert!(
+        items.iter().all(|i| i.withdrawn_reason.is_none()),
+        "{items:?}"
+    );
+}
+
 #[test]
 fn commands_need_a_signed_in_site_account() {
     let home = tempfile::tempdir().unwrap();
@@ -523,7 +677,13 @@ fn the_commands_parse_as_top_level_subcommands() {
     }
     let parsed = Root::try_parse_from(["x", "search", "pdf", "tools", "--kind", "skill"]).unwrap();
     assert_eq!(parsed.command.name(), "search");
-    for name in ["list", "equip a", "unequip a", "remove a"] {
+    for name in [
+        "list",
+        "equip a",
+        "unequip a",
+        "remove a",
+        "sync-installed --json",
+    ] {
         let args: Vec<&str> = std::iter::once("x").chain(name.split(' ')).collect();
         assert!(Root::try_parse_from(args).is_ok(), "{name}");
     }

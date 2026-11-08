@@ -265,6 +265,25 @@ pub(crate) struct SiteInstalled {
     pub(crate) update_available: bool,
     #[serde(default = "default_true")]
     pub(crate) enabled: bool,
+    /// `available` or `withdrawn`; `None` from a site that does not say (nothing is changed then).
+    #[serde(default)]
+    pub(crate) status: Option<String>,
+    #[serde(default, rename = "withdrawn_reason")]
+    pub(crate) reason: Option<String>,
+}
+
+pub(crate) const STATUS_AVAILABLE: &str = "available";
+pub(crate) const STATUS_WITHDRAWN: &str = "withdrawn";
+
+impl SiteInstalled {
+    /// The reason when the site says the item is withdrawn (`withdrawn` when it gives none).
+    pub(crate) fn withdrawn_reason(&self) -> Option<String> {
+        (self.status.as_deref() == Some(STATUS_WITHDRAWN)).then(|| {
+            self.reason
+                .clone()
+                .unwrap_or_else(|| STATUS_WITHDRAWN.to_string())
+        })
+    }
 }
 
 #[derive(Deserialize)]

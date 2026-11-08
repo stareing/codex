@@ -13,6 +13,7 @@ mod env_file;
 mod install;
 mod ledger;
 mod spec;
+mod sync;
 #[cfg(test)]
 mod test_support;
 mod unpack;
@@ -48,6 +49,9 @@ pub(crate) enum CatalogCommand {
     Unequip(SelectorArgs),
     /// Uninstall an MCP server or skill installed from the site's catalog.
     Remove(SelectorArgs),
+    /// Turn off what the site has withdrawn, and back on what it offers again.
+    #[command(name = "sync-installed")]
+    Sync(ListArgs),
 }
 
 #[derive(Debug, clap::ValueEnum, Clone, Copy)]
@@ -163,6 +167,7 @@ impl CatalogCommand {
             Self::Equip(_) => "equip",
             Self::Unequip(_) => "unequip",
             Self::Remove(_) => "remove",
+            Self::Sync(_) => "sync-installed",
         }
     }
 
@@ -170,7 +175,7 @@ impl CatalogCommand {
         match self {
             Self::Search(args) => args.json,
             Self::Install(args) => args.json,
-            Self::List(args) => args.json,
+            Self::List(args) | Self::Sync(args) => args.json,
             Self::Equip(args) | Self::Unequip(args) | Self::Remove(args) => args.json,
         }
     }
@@ -394,9 +399,13 @@ async fn run_list(
     }
     for item in &items {
         let state = match (item.local, item.enabled) {
-            (false, _) => "not on this computer",
-            (true, Some(false)) => "off",
-            (true, _) => "on",
+            (false, _) => "not on this computer".to_string(),
+            (true, Some(false)) => "off".to_string(),
+            (true, _) => "on".to_string(),
+        };
+        let state = match &item.withdrawn_reason {
+            Some(reason) => format!("{state} (withdrawn by the site: {reason})"),
+            None => state,
         };
         let update = match (&item.update_available, &item.latest_version) {
             (true, Some(latest)) => format!("  (update: {latest})"),
@@ -413,6 +422,50 @@ async fn run_list(
             item.name,
             item.version.as_deref().unwrap_or("-")
         );
+    }
+    Ok(())
+}
+
+async fn run_sync(
+    codex_home: &Path,
+    client: &CatalogClient,
+    args: &ListArgs,
+) -> Result<(), CatalogError> {
+    let done = sync::sync(codex_home, client).await?;
+    let failed = done.iter().filter(|item| item.action == "failed").count();
+    if args.json {
+        println!("{}", serde_json::json!({ "data": done }));
+    } else {
+        for item in &done {
+            match (item.action, &item.reason, &item.error) {
+                ("withdrawn", Some(reason), _) => println!(
+                    "Turned off `{}` ({}): withdrawn by the site ({reason}).",
+                    item.name, item.reference
+                ),
+                ("restored", ..) => println!(
+                    "`{}` ({}) is offered again: {}.",
+                    item.name,
+                    item.reference,
+                    if item.enabled {
+                        "turned back on"
+                    } else {
+                        "left off, as before"
+                    }
+                ),
+                (_, _, error) => eprintln!(
+                    "Could not update `{}` ({}): {}",
+                    item.name,
+                    item.reference,
+                    error.as_deref().unwrap_or("unknown error")
+                ),
+            }
+        }
+    }
+    if failed > 0 {
+        return Err(CatalogError::local(
+            "sync_incomplete",
+            format!("{failed} item(s) could not be updated"),
+        ));
     }
     Ok(())
 }
@@ -489,6 +542,7 @@ async fn dispatch(command: &CatalogCommand) -> Result<(), CatalogError> {
         CatalogCommand::Equip(args) => run_toggle(&codex_home, &client, args, true).await,
         CatalogCommand::Unequip(args) => run_toggle(&codex_home, &client, args, false).await,
         CatalogCommand::Remove(args) => run_remove(&codex_home, &client, args).await,
+        CatalogCommand::Sync(args) => run_sync(&codex_home, &client, args).await,
     }
 }
 
