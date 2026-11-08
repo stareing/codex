@@ -2467,6 +2467,13 @@
             "id": {
               "type": "string"
             },
+            "summary": {
+              "description": "The summary the history was replaced with; absent while compacting, for remote compaction and for rollouts written before it was recorded.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "enum": [
                 "contextCompaction"
