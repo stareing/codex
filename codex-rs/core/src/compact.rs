@@ -249,7 +249,8 @@ async fn run_compact_task_inner_impl(
     initial_context_injection: InitialContextInjection,
     compaction_metadata: CompactionTurnMetadata,
 ) -> CodexResult<String> {
-    let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
+    let compaction = ContextCompactionItem::new();
+    let compaction_item = TurnItem::ContextCompaction(compaction.clone());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
         .await;
     let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
@@ -392,6 +393,8 @@ async fn run_compact_task_inner_impl(
     .await;
     sess.recompute_token_usage(&turn_context).await;
 
+    // The completed item carries the summary so clients can show what the history was replaced with.
+    let compaction_item = TurnItem::ContextCompaction(compaction.with_summary(summary_suffix.clone()));
     sess.emit_turn_item_completed(&turn_context, compaction_item)
         .await;
     let warning = EventMsg::Warning(WarningEvent {

@@ -635,6 +635,11 @@ impl ThreadHistoryBuilder {
         );
         let should_upsert = match item {
             codex_protocol::items::TurnItem::Plan(plan) => !plan.text.is_empty(),
+            // Only a completed compaction that recorded its summary: older rollouts show compaction
+            // through the legacy `ContextCompacted` event instead, and would otherwise show it twice.
+            codex_protocol::items::TurnItem::ContextCompaction(compaction) => {
+                compaction.summary.is_some()
+            }
             codex_protocol::items::TurnItem::HookPrompt(_)
             | codex_protocol::items::TurnItem::FunctionCallOutput(_)
             | codex_protocol::items::TurnItem::CommandExecution(_)
@@ -651,8 +656,7 @@ impl ThreadHistoryBuilder {
             | codex_protocol::items::TurnItem::ImageView(_)
             | codex_protocol::items::TurnItem::ImageGeneration(_)
             | codex_protocol::items::TurnItem::FileChange(_)
-            | codex_protocol::items::TurnItem::McpToolCall(_)
-            | codex_protocol::items::TurnItem::ContextCompaction(_) => false,
+            | codex_protocol::items::TurnItem::McpToolCall(_) => false,
         };
 
         if should_upsert {
@@ -1175,7 +1179,7 @@ impl ThreadHistoryBuilder {
 
     fn handle_context_compacted(&mut self, _payload: &ContextCompactedEvent) {
         let id = self.next_item_id();
-        self.push_item_in_current_turn(ThreadItem::ContextCompaction { id });
+        self.push_item_in_current_turn(ThreadItem::ContextCompaction { id, summary: None });
     }
 
     fn handle_entered_review_mode(
@@ -4543,6 +4547,55 @@ mod tests {
                 duration_ms: None,
                 items_view: TurnItemsView::Full,
                 items: Vec::new(),
+            }]
+        );
+    }
+
+    #[test]
+    fn replays_a_compaction_with_its_summary_and_skips_one_without() {
+        let thread_id = ThreadId::new();
+        let completed = |item: codex_protocol::items::ContextCompactionItem| {
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                thread_id,
+                turn_id: "turn-1".into(),
+                item: CoreTurnItem::ContextCompaction(item),
+                started_at_ms: Some(0),
+                completed_at_ms: 0,
+            })
+        };
+        let with_summary = codex_protocol::items::ContextCompactionItem {
+            id: "compact-new".into(),
+            summary: Some("what was done so far".into()),
+        };
+        let without = codex_protocol::items::ContextCompactionItem {
+            id: "compact-old".into(),
+            summary: None,
+        };
+        let events = vec![
+            completed(without),
+            completed(with_summary),
+            EventMsg::TurnComplete(TurnCompleteEvent {
+                turn_id: "turn-1".into(),
+                started_at: None,
+                last_agent_message: None,
+                error: None,
+                completed_at: None,
+                duration_ms: None,
+                time_to_first_token_ms: None,
+            }),
+        ];
+
+        let mut builder = ThreadHistoryBuilder::new();
+        for event in &events {
+            builder.handle_event(event);
+        }
+        let turns = builder.finish();
+
+        assert_eq!(
+            turns[0].items,
+            vec![ThreadItem::ContextCompaction {
+                id: "compact-new".into(),
+                summary: Some("what was done so far".into()),
             }]
         );
     }

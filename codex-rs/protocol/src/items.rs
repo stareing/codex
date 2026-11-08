@@ -513,6 +513,11 @@ pub struct McpToolCallError {
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
 pub struct ContextCompactionItem {
     pub id: String,
+    /// The handoff summary the compaction wrote (without the fixed instruction prefix), once it is
+    /// done; absent while it runs, for remote compaction (opaque), and in older rollouts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub summary: Option<String>,
 }
 
 fn new_item_id() -> String {
@@ -521,7 +526,18 @@ fn new_item_id() -> String {
 
 impl ContextCompactionItem {
     pub fn new() -> Self {
-        Self { id: new_item_id() }
+        Self {
+            id: new_item_id(),
+            summary: None,
+        }
+    }
+
+    /// The same item, completed with the summary it produced.
+    pub fn with_summary(self, summary: String) -> Self {
+        Self {
+            summary: Some(summary),
+            ..self
+        }
     }
 }
 

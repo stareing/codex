@@ -229,6 +229,7 @@ pub(super) fn completed_item(
         EventMsg::ContextCompacted(_) => Some((
             TurnItem::ContextCompaction(ContextCompactionItem {
                 id: next_item_id()?,
+                summary: None,
             }),
             None,
         )),

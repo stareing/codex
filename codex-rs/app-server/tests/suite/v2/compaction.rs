@@ -212,16 +212,31 @@ async fn auto_compaction_emits_started_and_completed_items(route: CompactionRout
     let started = wait_for_context_compaction_started(&mut mcp).await?;
     let completed = wait_for_context_compaction_completed(&mut mcp).await?;
 
-    let ThreadItem::ContextCompaction { id: started_id } = started.item else {
+    let ThreadItem::ContextCompaction {
+        id: started_id,
+        summary: started_summary,
+    } = started.item
+    else {
         unreachable!("started item should be context compaction");
     };
-    let ThreadItem::ContextCompaction { id: completed_id } = completed.item else {
+    let ThreadItem::ContextCompaction {
+        id: completed_id,
+        summary: completed_summary,
+    } = completed.item
+    else {
         unreachable!("completed item should be context compaction");
     };
 
     assert_eq!(started.thread_id, thread_id);
     assert_eq!(completed.thread_id, thread_id);
     assert_eq!(started_id, completed_id);
+    assert_eq!(started_summary, None);
+    // A local compaction hands its summary to clients; a remote one is opaque.
+    let expected_summary = match route {
+        CompactionRoute::Local => Some("LOCAL_SUMMARY".to_string()),
+        CompactionRoute::Remote => None,
+    };
+    assert_eq!(completed_summary, expected_summary);
 
     let requests = requests.requests();
     assert_eq!(requests.len(), 4);
@@ -333,10 +348,10 @@ async fn thread_compact_start_triggers_compaction_and_returns_empty_response() -
     let completed = wait_for_context_compaction_completed(&mut mcp).await?;
     wait_for_turn_completed(&mut mcp, &started.turn_id).await?;
 
-    let ThreadItem::ContextCompaction { id: started_id } = started.item else {
+    let ThreadItem::ContextCompaction { id: started_id, .. } = started.item else {
         unreachable!("started item should be context compaction");
     };
-    let ThreadItem::ContextCompaction { id: completed_id } = completed.item else {
+    let ThreadItem::ContextCompaction { id: completed_id, .. } = completed.item else {
         unreachable!("completed item should be context compaction");
     };
 

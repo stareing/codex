@@ -425,6 +425,11 @@ pub enum ThreadItem {
     #[ts(rename_all = "camelCase")]
     ContextCompaction {
         id: String,
+        /// The summary the history was replaced with; absent while compacting, for remote
+        /// compaction and for rollouts written before it was recorded.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        summary: Option<String>,
     },
 }
 
@@ -1056,7 +1061,10 @@ impl From<CoreTurnItem> for ThreadItem {
                 }
             }
             CoreTurnItem::ContextCompaction(compaction) => {
-                ThreadItem::ContextCompaction { id: compaction.id }
+                ThreadItem::ContextCompaction {
+                    id: compaction.id,
+                    summary: compaction.summary,
+                }
             }
         }
     }

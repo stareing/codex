@@ -446,6 +446,7 @@ fn thread_items_list_round_trips() {
                 turn_id: "turn_456".to_string(),
                 item: ThreadItem::ContextCompaction {
                     id: "item_1".to_string(),
+                    summary: None,
                 },
                 started_at_ms,
                 completed_at_ms,
