@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/compact.rs
+assertion_line: 4687
 expression: "format_history_snapshot(\"True mid-turn continuation compaction after tool output: compact request includes tool artifacts, and the continuation request includes the summary in the same turn.\",\n&[first_turn_mock.single_request(), auto_compact_mock.single_request(),\npost_auto_compact_mock.single_request(),])"
 ---
 Scenario: True mid-turn continuation compaction after tool output: compact request includes tool artifacts, and the continuation request includes the summary in the same turn.
@@ -37,3 +38,5 @@ Scenario: True mid-turn continuation compaction after tool output: compact reque
 03:message/user:
     <COMPACTION_SUMMARY>
     AUTO_SUMMARY
+
+    The conversation was compacted while you were in the middle of this task. Continue it from where it stop...e summary, recap it, or ask the user what to do next. [hash=e75375499e9a7a47]

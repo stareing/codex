@@ -241,16 +241,19 @@ async fn a_compaction_puts_the_files_read_last_back_in_context() -> Result<()> {
     wait_for_event(codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     // Editing the restored file needs no new Read.
-    call(
+    let edited = call(
         &harness,
         "edit-k",
         "Edit",
         json!({ "file_path": "kept.txt", "old_string": "CHANGED", "new_string": "EDITED" }),
     )
     .await?;
+    let bodies = harness.request_bodies().await;
+    let requests: Vec<String> = bodies.iter().map(ToString::to_string).collect();
     assert_eq!(
         harness.read_file_text("kept.txt").await?,
-        "KEEP-ME-LINE-1\nEDITED-LINE-2\n"
+        "KEEP-ME-LINE-1\nEDITED-LINE-2\n",
+        "edit: {edited}\nrequests: {requests:#?}"
     );
     let bodies = harness.request_bodies().await;
     let after = bodies
@@ -324,7 +327,7 @@ async fn grep_and_glob_search_like_claude_code() -> Result<()> {
         json!({ "pattern": "src/**/*.rs" }),
     )
     .await?;
-    let mut files: Vec<&str> = output.lines().collect();
+    let mut files: Vec<String> = output.lines().map(|l| l.replace('\\', "/")).collect();
     files.sort();
     assert_eq!(files, ["src/app.rs", "src/other.rs"]);
 

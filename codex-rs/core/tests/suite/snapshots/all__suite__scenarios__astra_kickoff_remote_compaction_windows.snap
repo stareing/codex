@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios.rs
+assertion_line: 645
 expression: "context_snapshot::format_request_history_snapshot(\"Astra plans a kickoff with local and plugin skills, remotely compacts, and checks an image brief.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Astra plans a kickoff with local and plugin skills, remotely compacts, and checks an image brief.
@@ -32,7 +33,7 @@ Settings:
           - function/spawn_agent
           - function/wait_agent
 01:message/developer:
-    You are Codex, an agent based on GPT-6. You and the user share one workspace, and your job is to collabo...them until their intended goal is completely handled. [hash=efa50f074efa5803]
+    You are Onigio Agent, the coding agent of Onigio (onigio.com). You and the user share one workspace, and...them until their intended goal is completely handled. [hash=08fa2ff7634ae8a3]
 
     # When to ask the user for permission
 
@@ -40,7 +41,7 @@ Settings:
 
     User authorization and preferences persist across turns. Do not request permission again when the user h... any guidelines provided in skills or external files. [hash=911f91c92c72882c]
 
-    <OMITTED 155 LINES; ~4935 TOKENS; hash=5573869716192298>
+    <OMITTED 155 LINES; ~4937 TOKENS; hash=9f5819448867871f>
 
     - Skill naming: If a plugin contributes skills, those skill entries are prefixed with plugin_name: in the Skills list.
     - MCP naming: Plugin-provided MCP tools keep standard MCP identifiers such as mcp__server__tool; use tool provenance to tell which plugin they come from.
@@ -203,7 +204,7 @@ Settings: same as window 1
           - function/spawn_agent
           - function/wait_agent
 01:message/developer:
-    You are Codex, an agent based on GPT-6. You and the user share one workspace, and your job is to collabo...them until their intended goal is completely handled. [hash=efa50f074efa5803]
+    You are Onigio Agent, the coding agent of Onigio (onigio.com). You and the user share one workspace, and...them until their intended goal is completely handled. [hash=08fa2ff7634ae8a3]
 
     # When to ask the user for permission
 
@@ -211,7 +212,7 @@ Settings: same as window 1
 
     User authorization and preferences persist across turns. Do not request permission again when the user h... any guidelines provided in skills or external files. [hash=911f91c92c72882c]
 
-    <OMITTED 155 LINES; ~4935 TOKENS; hash=5573869716192298>
+    <OMITTED 155 LINES; ~4937 TOKENS; hash=9f5819448867871f>
 
     - Skill naming: If a plugin contributes skills, those skill entries are prefixed with plugin_name: in the Skills list.
     - MCP naming: Plugin-provided MCP tools keep standard MCP identifiers such as mcp__server__tool; use tool provenance to tell which plugin they come from.
@@ -225,7 +226,25 @@ Settings: same as window 1
 03:message/user:
     Summarize the kickoff notes with $notes:summarize.
 04:compaction:encrypted=true; chars=26; hash=ec5e2724e6f5f641
-05:message/developer[3]:
+05:message/user:
+    <codex_internal_context source="compaction_restore">
+    The conversation was just compacted. To carry on without reading them again, here is what was in use before it, restored as it is now.
+
+    Skills used in this conversation (keep following them):
+
+    <skill>
+    <name>notes:summarize</name>
+    <path><PLUGINS_CACHE>/test/notes/local/skills/summarize/SKILL.md</path>
+    <OMITTED 26 LINES; ~102 TOKENS; hash=36f59b87056c405b>
+    description: Draft a project outline
+    ---
+
+    List the goals and owners.
+
+    </skill>
+
+    </codex_internal_context>
+06:message/developer[3]:
     [01] <skills_instructions>
         ## Skills
         A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list ...ed into an absolute path using the skill roots table. [hash=ca27c3957f42502b]
@@ -271,7 +290,7 @@ Settings: same as window 1
 
         Never use the `request_user_input` tool for permission requests or permission-related escalations.
         </collaboration_mode>
-06:message/developer:
+07:message/developer:
     <multi_agent_role>You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
     At the start of your turn, you are the active agent.
@@ -289,9 +308,9 @@ Settings: same as window 1
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
     Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...ne"` or a positive integer string.</multi_agent_role> [hash=c7f52e90688299ce]
-07:message/developer:
+08:message/developer:
     <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
-08:message/user[2]:
+09:message/user[2]:
     [01] # AGENTS.md instructions for <AGENTS_DIRECTORY>
 
         <INSTRUCTIONS>
@@ -304,10 +323,10 @@ Settings: same as window 1
           <timezone><HOST_TIMEZONE></timezone>
           <filesystem><workspace_roots><root><WORKSPACE_ROOT 1></root></workspace_roots><permission_profile type...ntry></file_system></permission_profile></filesystem> [hash=911722cc43b4c3b8]
         </environment_context>
-09:message/user[2]:
+10:message/user[2]:
     [01] Check the final kickoff brief and attached sketch with $final-check and $calendar:agenda.
     [02] <input_image:image_url>
-10:message/user:
+11:message/user:
     <skill>
     <name>final-check</name>
     <path><SKILLS_ROOT>/final-check/SKILL.md</path>
@@ -319,7 +338,7 @@ Settings: same as window 1
     Check that the brief has an owner for every action.
 
     </skill>
-11:message/user:
+12:message/user:
     <skill>
     <name>calendar:agenda</name>
     <path><PLUGINS_CACHE>/test/calendar/local/skills/agenda/SKILL.md</path>
@@ -331,7 +350,7 @@ Settings: same as window 1
     List meetings with dates and attendees.
 
     </skill>
-12:message/developer:
+13:message/developer:
     Capabilities from the `calendar` plugin:
     - Skills from this plugin are prefixed with `calendar:`.
     Use these plugin-associated capabilities to help solve the task.

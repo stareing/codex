@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/compact.rs
-assertion_line: 4537
+assertion_line: 4593
 expression: "format_history_snapshot(\"Real paginated mid-turn compaction and cold resume from the bounded suffix.\",\n&requests,)"
 ---
 Scenario: Real paginated mid-turn compaction and cold resume from the bounded suffix.
@@ -95,6 +95,8 @@ Scenario: Real paginated mid-turn compaction and cold resume from the bounded su
 04:message/user:
     <COMPACTION_SUMMARY>
     AUTO_SUMMARY
+
+    The conversation was compacted while you were in the middle of this task. Continue it from where it stop...e summary, recap it, or ask the user what to do next. [hash=e75375499e9a7a47]
 -- request 4 (turn) --
 05:message/assistant:
     continued
