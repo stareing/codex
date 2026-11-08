@@ -101,10 +101,10 @@ remote_repo_root="$HOME/code/codex-sync"
 remote_codex_rs="$remote_repo_root/codex-rs"
 
 cd "${remote_codex_rs}"
-cargo build -p codex-cli --bin codex
+cargo build -p onigio-cli --bin onigio-agent
 
 rm -f "${remote_exec_server_log_path}" "${remote_exec_server_pid_path}"
-nohup ./target/debug/codex exec-server --listen ws://127.0.0.1:0 \
+nohup ./target/debug/onigio-agent exec-server --listen ws://127.0.0.1:0 \
   >"${remote_exec_server_log_path}" 2>&1 &
 remote_exec_server_pid="$!"
 echo "${remote_exec_server_pid}" >"${remote_exec_server_pid_path}"
@@ -169,8 +169,8 @@ fi
 echo "Remote exec server: ${listen_url}"
 echo "Remote exec server log: ${remote_exec_server_log_path}"
 echo "Press Ctrl-C to stop the SSH tunnel and remote exec server."
-echo "Start codex via: "
-printf '  CODEX_EXEC_SERVER_URL=ws://127.0.0.1:%s codex -C %q\n' \
+echo "Start onigio-agent via: "
+printf '  CODEX_EXEC_SERVER_URL=ws://127.0.0.1:%s onigio-agent -C %q\n' \
   "${local_exec_server_port}" \
   "${remote_repo_root}"
 

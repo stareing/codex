@@ -153,6 +153,7 @@ fn event_target(value: &str) -> Option<&'static str> {
             Some("sandbox_setup")
         }
         "onigio-command-runner.exe" | "codex-command-runner.exe" => Some("command_runner"),
+        "onigio-agent.exe" => Some("onigio-agent"),
         "codex.exe" => Some("codex"),
         "codex-desktop.exe" => Some("codex_desktop"),
         "chatgpt.exe" | "electron.exe" if trusted => Some("codex_desktop"),

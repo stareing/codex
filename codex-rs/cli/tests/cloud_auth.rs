@@ -33,7 +33,8 @@ async fn cloud_list_only_allows_trusted_credential_destinations() -> Result<()> 
     )?;
 
     let command = || -> Result<assert_cmd::Command> {
-        let mut command = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?);
+        let mut command =
+            assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?);
         command
             .current_dir(codex_home.path())
             .env("CODEX_HOME", codex_home.path())
@@ -85,7 +86,7 @@ async fn cloud_list_only_allows_trusted_credential_destinations() -> Result<()> 
         .args(["cloud", "list", "--limit", "1", "--json"])
         .assert()
         .failure()
-        .stderr(contains("Not signed in. Please run 'codex login'"));
+        .stderr(contains("Not signed in. Please run 'onigio-agent login'"));
     auth_server.verify().await;
     Ok(())
 }

@@ -1,5 +1,6 @@
-//! The program name users see. The cargo binary stays `codex` (upstream tests run it), while our
-//! releases ship it as `onigio-agent`; help, usage and `--version` follow the name it was run as.
+//! The program name users see. The cargo binary is `onigio-agent` (package `onigio-cli`); help,
+//! usage and `--version` still follow the name it was run as, so a copy run as `codex` keeps
+//! upstream's naming and home.
 
 use clap::ArgMatches;
 use clap::Command;

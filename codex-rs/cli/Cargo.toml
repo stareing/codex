@@ -1,13 +1,13 @@
 [package]
-name = "codex-cli"
+name = "onigio-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 build = "build.rs"
-default-run = "codex"
+default-run = "onigio-agent"
 
 [[bin]]
-name = "codex"
+name = "onigio-agent"
 path = "src/main.rs"
 
 [[bin]]
