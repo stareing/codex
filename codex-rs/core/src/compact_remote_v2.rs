@@ -308,6 +308,13 @@ async fn run_remote_compact_task_inner_impl(
         analytics_details.cached_input_tokens = Some(token_usage.cached_input_tokens);
         analytics_details.cache_write_input_tokens = Some(token_usage.cache_write_input_tokens);
     }
+    // What was in use (latest files, unfinished plan, skills) follows the compacted history.
+    let mut restored = crate::compact_restore::restore(
+        sess.as_ref(),
+        prompt_input.iter(),
+        compaction_turn_context.model_context_window(),
+    )
+    .await;
     let (compacted_history, retained_images) = build_v2_compacted_history(
         prompt_input,
         prompt_input_metadata,
@@ -323,8 +330,9 @@ async fn run_remote_compact_task_inner_impl(
     let (new_window_number, new_window_ids) = sess.advance_auto_compact_window().await;
     let (initial_context, world_state_baseline) =
         build_compaction_initial_context(sess.as_ref(), &initial_context_injection).await;
-    let new_history =
+    let mut new_history =
         insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context);
+    restored.append_to(&mut new_history, &compaction_turn_context.sub_id);
 
     let reference_context_item = match initial_context_injection {
         InitialContextInjection::DoNotInject => None,
@@ -370,6 +378,7 @@ async fn run_remote_compact_task_inner_impl(
         },
     )
     .await;
+    restored.mark_files_seen(sess.as_ref());
     sess.recompute_token_usage(compaction_turn_context).await;
 
     sess.emit_turn_item_completed(compaction_turn_context, compaction_item)

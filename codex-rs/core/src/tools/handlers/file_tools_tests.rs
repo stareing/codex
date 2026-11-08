@@ -74,7 +74,7 @@ fn read_stops_at_a_whole_line_within_the_size_limit() {
     let out = numbered(&text, 1, 2000, 60);
     assert!(out.starts_with("     1\tline 1\n"), "{out}");
     assert!(
-        out.ends_with("(output size limit: showing lines 1-3 of 100; pass offset 4 to read on, or Grep for what you need)\n"),
+        out.ends_with("(output size limit: showing lines 1-4 of 100; pass offset 5 to read on, or Grep for what you need)\n"),
         "{out}"
     );
     // One line is always shown, however long.

@@ -372,16 +372,13 @@ async fn run_compact_task_inner_impl(
         summary_item.set_turn_id_if_missing(&turn_context.sub_id);
     }
     // What was in use (latest files, unfinished plan, skills) follows the summary.
-    let restored = crate::compact_restore::restore(
+    let mut restored = crate::compact_restore::restore(
         sess.as_ref(),
-        history_items,
+        history_items.iter().map(|envelope| &envelope.item),
         turn_context.model_context_window(),
     )
     .await;
-    if let Some(mut item) = restored.item {
-        item.set_turn_id_if_missing(&turn_context.sub_id);
-        new_history.push(item);
-    }
+    restored.append_to(&mut new_history, &turn_context.sub_id);
     let (window_number, window_ids) = sess.advance_auto_compact_window().await;
 
     let (initial_context, world_state_baseline) =
@@ -410,16 +407,7 @@ async fn run_compact_task_inner_impl(
         },
     )
     .await;
-    {
-        // The restored files are in the context again: Edit/Write may change them without a new Read.
-        let mut reads = sess
-            .file_reads
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for file in restored.files {
-            reads.wrote(file.key, file.uri, &file.text);
-        }
-    }
+    restored.mark_files_seen(sess.as_ref());
     sess.recompute_token_usage(&turn_context).await;
     // A compaction that worked, manual or automatic, lets automatic compaction try again.
     sess.auto_compact_failures
@@ -612,7 +600,7 @@ fn compacted_user_message<'a>(
 
 /// Appended to the summary when the compaction happened in the middle of a turn, which then goes on by
 /// itself: the model should keep working, not greet, recap or ask what to do.
-pub(crate) const MID_TURN_CONTINUATION: &str = "The conversation was compacted while you were in the middle of this task. Continue it from where it stopped: do not acknowledge the summary, recap it, or ask the user what to do next.";
+pub const MID_TURN_CONTINUATION: &str = "The conversation was compacted while you were in the middle of this task. Continue it from where it stopped: do not acknowledge the summary, recap it, or ask the user what to do next.";
 
 /// The message the history is replaced with: the fixed handoff prefix, the summary, and, mid-turn, the
 /// instruction to carry on.

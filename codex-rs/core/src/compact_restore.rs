@@ -45,6 +45,28 @@ pub(crate) struct Restored {
     pub(crate) files: Vec<RestoredFile>,
 }
 
+impl Restored {
+    /// Appends the restored context to the replacement history, as part of turn `turn_id`.
+    pub(crate) fn append_to(&mut self, history: &mut Vec<ResponseItemEnvelope>, turn_id: &str) {
+        if let Some(mut item) = self.item.take() {
+            item.set_turn_id_if_missing(turn_id);
+            history.push(item);
+        }
+    }
+
+    /// After the history was replaced: the restored files are in the context again, so `Edit`/`Write` may
+    /// change them without a new `Read`.
+    pub(crate) fn mark_files_seen(self, sess: &Session) {
+        let mut reads = sess
+            .file_reads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for file in self.files {
+            reads.wrote(file.key, file.uri, &file.text);
+        }
+    }
+}
+
 /// The token budgets for files and skills on a model with `context_window` tokens.
 pub(crate) fn budgets(context_window: Option<i64>) -> (usize, usize) {
     let share = context_window
@@ -57,15 +79,18 @@ pub(crate) fn budgets(context_window: Option<i64>) -> (usize, usize) {
 }
 
 /// The context to put back after replacing `history` (the history before compaction).
-pub(crate) async fn restore(
+pub(crate) async fn restore<'a, I>(
     sess: &Session,
-    history: &[ResponseItemEnvelope],
+    history: I,
     context_window: Option<i64>,
-) -> Restored {
+) -> Restored
+where
+    I: DoubleEndedIterator<Item = &'a ResponseItem> + Clone,
+{
     let (files_budget, skills_budget) = budgets(context_window);
     let files = read_recent_files(sess, files_budget).await;
-    let plan = unfinished_plan(history.iter().map(|e| &e.item));
-    let skills = used_skills(history.iter().map(|e| &e.item), skills_budget);
+    let plan = unfinished_plan(history.clone());
+    let skills = used_skills(history, skills_budget);
     let body = render(&files, plan.as_deref(), &skills);
     let item = body.map(|body| {
         ResponseItemEnvelope::new(ContextualUserFragment::into(

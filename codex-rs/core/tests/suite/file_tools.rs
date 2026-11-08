@@ -257,7 +257,10 @@ async fn a_compaction_puts_the_files_read_last_back_in_context() -> Result<()> {
         .last()
         .expect("a request after the compaction")
         .to_string();
-    assert!(after.contains("The conversation was just compacted"), "{after}");
+    assert!(
+        after.contains("The conversation was just compacted"),
+        "{after}"
+    );
     assert!(after.contains("CHANGED-LINE-2"), "{after}");
     Ok(())
 }
@@ -299,7 +302,11 @@ async fn grep_and_glob_search_like_claude_code() -> Result<()> {
         json!({ "pattern": "needle", "output_mode": "content", "-n": "true" }),
     )
     .await?;
-    assert_eq!(output, "src/app.rs:2:    let needle = 1;");
+    // rg prints the platform's separator.
+    assert_eq!(
+        output.replace('\\', "/"),
+        "src/app.rs:2:    let needle = 1;"
+    );
 
     let output = call(
         &harness,

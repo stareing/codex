@@ -305,7 +305,7 @@ fn known_segment_name(text: &str, source: TextSource<'_>) -> Option<String> {
         TextSource::Message("user") => &[
             ("# AGENTS.md instructions", "AGENTS_MD"),
             (
-                "You are performing a CONTEXT CHECKPOINT COMPACTION.",
+                "You are writing a CONTEXT CHECKPOINT.",
                 "SUMMARIZATION_PROMPT",
             ),
             (

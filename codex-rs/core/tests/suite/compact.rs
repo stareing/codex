@@ -1,6 +1,7 @@
 use anyhow::Result;
 use anyhow::anyhow;
 use codex_core::TurnInputRequest;
+use codex_core::compact::MID_TURN_CONTINUATION;
 use codex_core::compact::SUMMARIZATION_PROMPT;
 use codex_core::compact::SUMMARY_PREFIX;
 use codex_core::config::Config;
@@ -151,6 +152,11 @@ fn auto_summary(summary: &str) -> String {
 
 fn summary_with_prefix(summary: &str) -> String {
     format!("{SUMMARY_PREFIX}\n{summary}")
+}
+
+/// The summary of a compaction in the middle of a task, which asks the model to carry on.
+fn mid_turn_summary(summary: &str) -> String {
+    format!("{SUMMARY_PREFIX}\n{summary}\n\n{MID_TURN_CONTINUATION}")
 }
 
 fn set_test_compact_prompt(config: &mut Config) {
@@ -1378,9 +1384,9 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     let second_summary_text = "The task is to create an app. I started to create a react app. then I realized that I need to create a node app.";
     let third_summary_text = "The task is to create an app. I started to create a react app. then I realized that I need to create a node app. then I realized that I need to create a python app.";
     // summary texts with prefix
-    let prefixed_first_summary = summary_with_prefix(first_summary_text);
-    let prefixed_second_summary = summary_with_prefix(second_summary_text);
-    let prefixed_third_summary = summary_with_prefix(third_summary_text);
+    let prefixed_first_summary = mid_turn_summary(first_summary_text);
+    let prefixed_second_summary = mid_turn_summary(second_summary_text);
+    let prefixed_third_summary = mid_turn_summary(third_summary_text);
     // token used count after long work
     let token_count_used = 270_000;
     // token used count after compaction

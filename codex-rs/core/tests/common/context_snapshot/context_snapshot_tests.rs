@@ -660,7 +660,7 @@ fn rewritten_segments_share_one_tag_format_and_keep_compaction_data() {
         ),
         message(
             "user",
-            "You are performing a CONTEXT CHECKPOINT COMPACTION. Routine guidance.",
+            "You are writing a CONTEXT CHECKPOINT. Routine guidance.",
         ),
         message(
             "user",
