@@ -737,6 +737,10 @@ pub enum Op {
     /// to generate a summary which will be returned as an AgentMessage event.
     Compact,
 
+    /// `Compact`, with the user's own instructions for what the summary should focus on
+    /// (`/compact <instructions>`); they are appended to the summarization prompt.
+    CompactWithInstructions { instructions: String },
+
     /// Set whether the thread remains eligible for memory generation.
     ///
     /// This persists thread-level memory mode metadata without involving the
@@ -956,6 +960,7 @@ impl Op {
             Self::RefreshMcpServers => "refresh_mcp_servers",
             Self::ReloadUserConfig => "reload_user_config",
             Self::Compact => "compact",
+            Self::CompactWithInstructions { .. } => "compact_with_instructions",
             Self::SetThreadMemoryMode { .. } => "set_thread_memory_mode",
             Self::Review { .. } => "review",
             Self::ApproveGuardianDeniedAction { .. } => "approve_guardian_denied_action",

@@ -13,8 +13,20 @@ use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::user_input::UserInput;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone, Copy, Default)]
-pub(crate) struct CompactTask;
+#[derive(Clone, Default)]
+pub(crate) struct CompactTask {
+    /// The user's own focus for the summary (`/compact <instructions>`).
+    instructions: Option<String>,
+}
+
+impl CompactTask {
+    pub(crate) fn new(instructions: Option<String>) -> Self {
+        let instructions = instructions
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty());
+        Self { instructions }
+    }
+}
 
 impl SessionTask for CompactTask {
     fn kind(&self) -> TaskKind {
@@ -53,13 +65,16 @@ impl SessionTask for CompactTask {
                     "local",
                     /*manual*/ true,
                 );
+                let base = ctx
+                    .config
+                    .compact_prompt
+                    .as_deref()
+                    .unwrap_or(crate::compact::SUMMARIZATION_PROMPT);
                 let input = vec![UserInput::Text {
-                    text: ctx
-                        .config
-                        .compact_prompt
-                        .as_deref()
-                        .unwrap_or(crate::compact::SUMMARIZATION_PROMPT)
-                        .to_string(),
+                    text: crate::compact::prompt_with_instructions(
+                        base,
+                        self.instructions.as_deref(),
+                    ),
                     // Compaction prompt is synthesized; no UI element ranges to preserve.
                     text_elements: Vec::new(),
                 }];

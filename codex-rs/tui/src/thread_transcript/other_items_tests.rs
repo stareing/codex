@@ -166,6 +166,7 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
         },
         ThreadItem::ContextCompaction {
             id: "compact-1".to_string(),
+            summary: None,
         },
     ];
     let rendered = items

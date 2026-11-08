@@ -312,10 +312,14 @@ async fn run_compact_task_inner_impl(
             Err(e) if matches!(e.details(), CodexErrorDetails::ContextWindowExceeded) => {
                 if turn_input_len > 1 {
                     // Trim from the beginning to preserve cache (prefix-based) and keep recent messages intact.
+                    // A fifth of the history at a time, so a long thread needs a few retries, not hundreds.
+                    let drop = oldest_items_to_drop(turn_input_len);
                     error!(
-                        "Context window exceeded while compacting; removing oldest history item. Error: {e}"
+                        "Context window exceeded while compacting; removing the {drop} oldest history items. Error: {e}"
                     );
-                    history.remove_first_item();
+                    for _ in 0..drop {
+                        history.remove_first_item();
+                    }
                     retries = 0;
                     continue;
                 }
@@ -345,16 +349,19 @@ async fn run_compact_task_inner_impl(
     let history_items = history_snapshot.annotated_items();
     let summary_suffix = if matches!(compaction_metadata.phase(), CompactionPhase::PostTurn) {
         get_last_assistant_message_from_turn(compaction_response.output.iter())
-            .filter(|summary| !summary.trim().is_empty())
+            .map(|answer| summary_from_compaction_answer(&answer))
+            .filter(|summary| !summary.is_empty())
             .ok_or_else(|| {
                 CodexErr::Stream(
                     "Post-turn compaction completed without an assistant summary".to_string(),
                 )
             })?
     } else {
-        get_last_assistant_message_from_turn(history_snapshot.raw_items()).unwrap_or_default()
+        get_last_assistant_message_from_turn(history_snapshot.raw_items())
+            .map(|answer| summary_from_compaction_answer(&answer))
+            .unwrap_or_default()
     };
-    let summary_text = format!("{SUMMARY_PREFIX}\n{summary_suffix}");
+    let summary_text = summary_message(&summary_suffix, compaction_metadata.phase());
     let user_messages = collect_annotated_user_messages(history_items);
 
     let mut new_history = build_compacted_history(Vec::new(), &user_messages, &summary_text);
@@ -392,6 +399,9 @@ async fn run_compact_task_inner_impl(
     )
     .await;
     sess.recompute_token_usage(&turn_context).await;
+    // A compaction that worked, manual or automatic, lets automatic compaction try again.
+    sess.auto_compact_failures
+        .store(0, std::sync::atomic::Ordering::Relaxed);
 
     // The completed item carries the summary so clients can show what the history was replaced with.
     let compaction_item = TurnItem::ContextCompaction(compaction.with_summary(summary_suffix.clone()));
@@ -575,6 +585,59 @@ fn compacted_user_message<'a>(
         original: item,
         harness_metadata,
     })
+}
+
+/// Appended to the summary when the compaction happened in the middle of a turn, which then goes on by
+/// itself: the model should keep working, not greet, recap or ask what to do.
+pub(crate) const MID_TURN_CONTINUATION: &str = "The conversation was compacted while you were in the middle of this task. Continue it from where it stopped: do not acknowledge the summary, recap it, or ask the user what to do next.";
+
+/// The message the history is replaced with: the fixed handoff prefix, the summary, and, mid-turn, the
+/// instruction to carry on.
+pub(crate) fn summary_message(summary: &str, phase: CompactionPhase) -> String {
+    match phase {
+        CompactionPhase::MidTurn => format!("{SUMMARY_PREFIX}\n{summary}\n\n{MID_TURN_CONTINUATION}"),
+        CompactionPhase::StandaloneTurn | CompactionPhase::PreTurn | CompactionPhase::PostTurn => {
+            format!("{SUMMARY_PREFIX}\n{summary}")
+        }
+    }
+}
+
+/// How many of the oldest items to drop when the compaction request itself is too long: a fifth of the
+/// input, at least one, never the last item (the summarization prompt).
+pub(crate) fn oldest_items_to_drop(input_len: usize) -> usize {
+    (input_len / 5).max(1).min(input_len.saturating_sub(1))
+}
+
+/// The summarization prompt with the user's `/compact <instructions>` appended, if any.
+pub(crate) fn prompt_with_instructions(prompt: &str, instructions: Option<&str>) -> String {
+    match instructions.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(text) => format!(
+            "{prompt}\n\nAdditional instructions from the user for this summary (follow them):\n{text}"
+        ),
+        None => prompt.to_string(),
+    }
+}
+
+/// The handoff summary in a compaction answer. The prompt asks for an `<analysis>` scratchpad followed by a
+/// `<summary>` block: the scratchpad is dropped and the summary unwrapped. An answer without those tags is kept
+/// as it is (models that ignore the format, custom `compact_prompt`s).
+pub(crate) fn summary_from_compaction_answer(answer: &str) -> String {
+    const ANALYSIS_OPEN: &str = "<analysis>";
+    const ANALYSIS_CLOSE: &str = "</analysis>";
+    const SUMMARY_OPEN: &str = "<summary>";
+    const SUMMARY_CLOSE: &str = "</summary>";
+    if let Some(start) = answer.find(SUMMARY_OPEN) {
+        let body = &answer[start + SUMMARY_OPEN.len()..];
+        let body = body.find(SUMMARY_CLOSE).map_or(body, |end| &body[..end]);
+        return body.trim().to_string();
+    }
+    let without_analysis = match (answer.find(ANALYSIS_OPEN), answer.find(ANALYSIS_CLOSE)) {
+        (Some(start), Some(end)) if end > start => {
+            format!("{}{}", &answer[..start], &answer[end + ANALYSIS_CLOSE.len()..])
+        }
+        _ => answer.to_string(),
+    };
+    without_analysis.trim().to_string()
 }
 
 pub(crate) fn is_summary_message(message: &str) -> bool {

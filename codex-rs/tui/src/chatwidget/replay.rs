@@ -426,7 +426,7 @@ impl ChatWidget {
             ThreadItem::ExitedReviewMode { .. } => {
                 self.exit_review_mode_after_item();
             }
-            ThreadItem::ContextCompaction { id } => {
+            ThreadItem::ContextCompaction { id, .. } => {
                 self.on_context_compaction_completed(&id, from_replay);
             }
             ThreadItem::FunctionCallOutput {

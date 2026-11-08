@@ -1151,6 +1151,47 @@ async fn reasoning_effort_override_remote_v2_compaction_resets_pinned_effort(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_compact_with_instructions_sends_them_with_the_prompt() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let request_log = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("m1", SUMMARY_TEXT),
+            ev_completed_with_tokens("r1", /*total_tokens*/ 10),
+        ]),
+    )
+    .await;
+
+    let model_provider = non_openai_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        set_test_compact_prompt(config);
+    });
+    let codex = builder.build(&server).await.unwrap().codex;
+
+    codex
+        .submit(Op::CompactWithInstructions {
+            instructions: "  keep the port numbers  ".to_string(),
+        })
+        .await
+        .unwrap();
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+    let request = request_log.single_request();
+    let prompt = request
+        .message_input_texts("user")
+        .into_iter()
+        .find(|text| text.contains(SUMMARIZATION_PROMPT))
+        .expect("the compaction prompt was sent");
+    assert!(
+        prompt.ends_with("\nkeep the port numbers"),
+        "the trimmed instructions follow the prompt: {prompt}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manual_compact_records_durable_and_local_token_usage() {
     skip_if_no_network!();
 

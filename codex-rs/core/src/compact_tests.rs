@@ -700,3 +700,58 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_compaction_last
     ];
     assert_eq!(refreshed, expected);
 }
+
+#[test]
+fn compaction_answer_keeps_only_the_summary_block() {
+    let answer = "<analysis>\nwalked through it\n</analysis>\n\n<summary>\n1. Goal: ship it\n</summary>\n";
+    assert_eq!(summary_from_compaction_answer(answer), "1. Goal: ship it");
+}
+
+#[test]
+fn compaction_answer_without_summary_tags_drops_only_the_analysis() {
+    assert_eq!(
+        summary_from_compaction_answer("<analysis>draft</analysis>\nGoal: ship it\n"),
+        "Goal: ship it"
+    );
+    assert_eq!(summary_from_compaction_answer("  plain handoff  "), "plain handoff");
+    // An unclosed summary (cut off by the output limit) keeps what was written.
+    assert_eq!(
+        summary_from_compaction_answer("<analysis>x</analysis><summary>1. Goal: ship"),
+        "1. Goal: ship"
+    );
+    // An unclosed analysis is not guessed at.
+    assert_eq!(
+        summary_from_compaction_answer("<analysis>only a draft"),
+        "<analysis>only a draft"
+    );
+}
+
+#[test]
+fn compact_prompt_appends_the_users_instructions() {
+    assert_eq!(prompt_with_instructions("P", None), "P");
+    assert_eq!(prompt_with_instructions("P", Some("   ")), "P");
+    let prompt = prompt_with_instructions("P", Some(" focus on the failing tests "));
+    assert!(prompt.starts_with("P\n\n"), "{prompt}");
+    assert!(prompt.ends_with("\nfocus on the failing tests"), "{prompt}");
+}
+
+#[test]
+fn only_a_mid_turn_summary_tells_the_model_to_carry_on() {
+    let mid = summary_message("S", CompactionPhase::MidTurn);
+    assert!(is_summary_message(&mid));
+    assert!(mid.ends_with(MID_TURN_CONTINUATION), "{mid}");
+    for phase in [CompactionPhase::StandaloneTurn, CompactionPhase::PreTurn, CompactionPhase::PostTurn] {
+        let text = summary_message("S", phase);
+        assert!(is_summary_message(&text));
+        assert_eq!(text, format!("{SUMMARY_PREFIX}\nS"));
+    }
+}
+
+#[test]
+fn an_overlong_compaction_drops_a_fifth_of_the_oldest_items() {
+    assert_eq!(oldest_items_to_drop(2), 1);
+    assert_eq!(oldest_items_to_drop(9), 1);
+    assert_eq!(oldest_items_to_drop(10), 2);
+    assert_eq!(oldest_items_to_drop(500), 100);
+    assert_eq!(oldest_items_to_drop(1), 0);
+}

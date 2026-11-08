@@ -94,6 +94,9 @@ pub(crate) struct Session {
     pub(super) fork_persistence: ForkPersistence,
     pub(super) forked_from_ordinal_exclusive: Option<u64>,
     pub(super) next_internal_sub_id: AtomicU64,
+    /// Automatic compactions that failed in a row; at `AUTO_COMPACT_MAX_FAILURES` automatic
+    /// compaction stops trying until one succeeds (a manual `/compact` resets it).
+    pub(crate) auto_compact_failures: std::sync::atomic::AtomicU32,
 }
 
 #[derive(Clone)]
@@ -1792,6 +1795,7 @@ impl Session {
                 fork_persistence,
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
+                auto_compact_failures: std::sync::atomic::AtomicU32::new(0),
             });
             if let Some(startup) = &startup {
                 let _ = startup.session.set(Arc::clone(&sess));

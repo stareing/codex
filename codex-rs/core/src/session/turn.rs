@@ -1452,12 +1452,58 @@ async fn maybe_run_previous_model_inline_compact(
     Ok(())
 }
 
+/// Automatic compactions that may fail in a row before automatic compaction stops trying; a context that
+/// cannot be summarized would otherwise spend a model call on every turn and fail each time.
+pub(crate) const AUTO_COMPACT_MAX_FAILURES: u32 = 3;
+
 #[instrument(
     level = "trace",
     skip_all,
     fields(reason = ?reason, phase = ?phase)
 )]
 async fn run_auto_compact(
+    sess: &Arc<Session>,
+    step_context: Arc<StepContext>,
+    fallback_step_context: Option<Arc<StepContext>>,
+    client_session: &mut ModelClientSession,
+    initial_context_injection: InitialContextInjection,
+    reason: CompactionReason,
+    phase: CompactionPhase,
+) -> CodexResult<()> {
+    use std::sync::atomic::Ordering;
+    if sess.auto_compact_failures.load(Ordering::Relaxed) >= AUTO_COMPACT_MAX_FAILURES {
+        warn!("skipping automatic compaction after {AUTO_COMPACT_MAX_FAILURES} failures in a row");
+        return Ok(());
+    }
+    let turn_context = Arc::clone(&step_context.turn);
+    let result = run_auto_compact_once(
+        sess,
+        step_context,
+        fallback_step_context,
+        client_session,
+        initial_context_injection,
+        reason,
+        phase,
+    )
+    .await;
+    match &result {
+        Ok(()) => sess.auto_compact_failures.store(0, Ordering::Relaxed),
+        Err(err) if matches!(err.details(), CodexErrorDetails::TurnAborted | CodexErrorDetails::Interrupted) => {}
+        Err(_) => {
+            let failures = sess.auto_compact_failures.fetch_add(1, Ordering::Relaxed) + 1;
+            if failures == AUTO_COMPACT_MAX_FAILURES {
+                let message = format!(
+                    "Automatic compaction failed {AUTO_COMPACT_MAX_FAILURES} times in a row and is paused for this thread. Run /compact to try again, or start a new thread."
+                );
+                sess.send_event(turn_context.as_ref(), EventMsg::Warning(WarningEvent { message }))
+                    .await;
+            }
+        }
+    }
+    result
+}
+
+async fn run_auto_compact_once(
     sess: &Arc<Session>,
     step_context: Arc<StepContext>,
     fallback_step_context: Option<Arc<StepContext>>,
