@@ -283,7 +283,7 @@ pub(crate) fn resolve_provider(
 
 /// Shown when a branded binary has neither a sign-in nor a configured provider.
 pub const NO_MODEL_CONFIGURED: &str = "No model configured. Sign in to use Onigio's models: \
-`onigio-agent login` (or `login --password`), or set `model_provider` and `model` in \
+`onigio login` (or `login --password`), or set `model_provider` and `model` in \
 config.toml to use your own.";
 
 static REQUIRE_CHOSEN_PROVIDER: AtomicBool = AtomicBool::new(false);

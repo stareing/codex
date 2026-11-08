@@ -575,11 +575,11 @@ impl Drop for TmuxSession {
 }
 
 fn codex_binary(repo_root: &Path) -> Result<PathBuf> {
-    if let Ok(path) = codex_utils_cargo_bin::cargo_bin("onigio-agent") {
+    if let Ok(path) = codex_utils_cargo_bin::cargo_bin("onigio") {
         return Ok(path);
     }
 
-    let fallback = repo_root.join("codex-rs/target/debug/onigio-agent");
+    let fallback = repo_root.join("codex-rs/target/debug/onigio");
     anyhow::ensure!(
         fallback.is_file(),
         "codex binary is unavailable; run `cargo build -p onigio-cli` first"

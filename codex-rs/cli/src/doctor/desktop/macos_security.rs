@@ -180,7 +180,7 @@ fn enforcement_check(gatekeeper: Evidence, events: Evidence) -> DoctorCheck {
         (
             CheckStatus::Warning,
             "recent macos security enforcement history was unavailable",
-            "check access to macos unified security logs and rerun onigio-agent doctor",
+            "check access to macos unified security logs and rerun onigio doctor",
         )
     } else {
         return desktop_check(

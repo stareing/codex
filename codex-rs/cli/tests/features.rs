@@ -20,7 +20,7 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 fn codex_command(codex_home: &Path) -> Result<assert_cmd::Command> {
-    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?);
+    let mut cmd = assert_cmd::Command::new(codex_utils_cargo_bin::cargo_bin("onigio")?);
     cmd.env("CODEX_HOME", codex_home);
     Ok(cmd)
 }
@@ -123,7 +123,7 @@ fn strict_config_is_not_supported_for_cloud_command() -> Result<()> {
         .assert()
         .failure()
         .stderr(contains(
-            "`--strict-config` is not supported for `onigio-agent cloud`",
+            "`--strict-config` is not supported for `onigio cloud`",
         ));
 
     Ok(())
@@ -370,9 +370,9 @@ fn no_daemon_rejects_agents_and_explicit_remote_targets() -> Result<()> {
         let args = args.split_whitespace().collect::<Vec<_>>();
         let home = TempDir::new()?;
         let expected = if args.contains(&"agents") {
-            "--no-daemon cannot be used with onigio-agent agents."
+            "--no-daemon cannot be used with onigio agents."
         } else if args.contains(&"queue") && !args.contains(&"--remote") {
-            "--no-daemon cannot be used with onigio-agent queue."
+            "--no-daemon cannot be used with onigio queue."
         } else {
             "--no-daemon cannot be used with --remote."
         };

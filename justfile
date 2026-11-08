@@ -15,11 +15,11 @@ help:
 # `codex`
 alias c := codex
 codex *args:
-    cargo run --bin onigio-agent -- {args}
+    cargo run --bin onigio -- {args}
 
 # `codex exec`
 exec *args:
-    cargo run --bin onigio-agent -- exec {args}
+    cargo run --bin onigio -- exec {args}
 
 # Start `codex exec-server` and run codex-tui.
 [no-cd]

@@ -19,7 +19,7 @@ use wiremock::matchers::body_string_contains;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Result<()> {
-    let start = if codex_utils_cargo_bin::cargo_bin("onigio-agent").is_ok() {
+    let start = if codex_utils_cargo_bin::cargo_bin("onigio").is_ok() {
         PtyCodex::start_cli
     } else {
         PtyCodex::start

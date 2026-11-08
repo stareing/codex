@@ -279,7 +279,7 @@ impl ThreadQueueRequestProcessor {
                 })?;
             if stored.archived_at.is_some() {
                 return Err(invalid_request(format!(
-                    "session {thread_id} is archived. Run `onigio-agent unarchive {thread_id}` to unarchive it first."
+                    "session {thread_id} is archived. Run `onigio unarchive {thread_id}` to unarchive it first."
                 )));
             }
             (None, stored.source)

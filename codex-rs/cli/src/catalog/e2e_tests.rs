@@ -630,11 +630,7 @@ fn commands_need_a_signed_in_site_account() {
     let home = tempfile::tempdir().unwrap();
     let err = signed_in_client(home.path()).err().unwrap();
     assert_eq!(err.code, "not_signed_in");
-    assert!(
-        err.message().contains("onigio-agent login"),
-        "{}",
-        err.message()
-    );
+    assert!(err.message().contains("onigio login"), "{}", err.message());
     sign_in(home.path(), "https://onigio.com", "  ");
     assert_eq!(
         signed_in_client(home.path()).err().map(|e| e.code),
@@ -656,7 +652,7 @@ fn the_commands_parse_as_top_level_subcommands() {
         command: CatalogCommand,
     }
     let parsed = Root::try_parse_from([
-        "onigio-agent",
+        "onigio",
         "install",
         "store:mcp/context7",
         "--yes",

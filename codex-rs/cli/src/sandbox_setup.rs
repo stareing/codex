@@ -53,7 +53,7 @@ impl SandboxSetupCommand {
         if self.elevated_sandbox_level {
             Ok(SandboxSetupLevel::Elevated)
         } else {
-            anyhow::bail!("`onigio-agent sandbox setup` currently requires --elevated");
+            anyhow::bail!("`onigio sandbox setup` currently requires --elevated");
         }
     }
 }

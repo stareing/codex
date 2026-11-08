@@ -30,14 +30,14 @@ const MAX_DETAIL_CHARS: usize = 300;
 /// What to do next, by refusal code (codes are the site's `agent_catalog/refusals.py`, plus the
 /// local ones this CLI raises).
 const HINTS: &[(&str, &str)] = &[
-    ("not_signed_in", "Sign in first: run `onigio-agent login`."),
+    ("not_signed_in", "Sign in first: run `onigio login`."),
     (
         "unauthorized",
-        "The site no longer accepts this computer's sign-in; run `onigio-agent login` again.",
+        "The site no longer accepts this computer's sign-in; run `onigio login` again.",
     ),
     (
         "not_found",
-        "Nothing in the catalog matches; try `onigio-agent search <words>`.",
+        "Nothing in the catalog matches; try `onigio search <words>`.",
     ),
     (
         "ambiguous_ref",
