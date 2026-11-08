@@ -32,6 +32,12 @@ const WINDOW_SHARE: usize = 8;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const PLAN_TOOL: &str = "update_plan";
 const SKILL_OPEN_TAG: &str = "<skill>";
+const SKILL_CLOSE_TAG: &str = "</skill>";
+/// Source label of the restored context message.
+const SOURCE: &str = "compaction_restore";
+const PLAN_OPEN_TAG: &str = "<plan>";
+const PLAN_CLOSE_TAG: &str = "</plan>";
+const FILES_HEADING: &str = "\nFiles read or changed last";
 
 /// One file put back, to record as seen once the history is replaced.
 pub(crate) struct RestoredFile {
@@ -94,10 +100,7 @@ where
     let body = render(&files, plan.as_deref(), &skills);
     let item = body.map(|body| {
         ResponseItemEnvelope::new(ContextualUserFragment::into(
-            InternalModelContextFragment::new(
-                InternalContextSource::from_static("compaction_restore"),
-                body,
-            ),
+            InternalModelContextFragment::new(InternalContextSource::from_static(SOURCE), body),
         ))
     });
     Restored {
@@ -175,16 +178,65 @@ fn approx_bytes(tokens: usize) -> usize {
     TruncationPolicy::Tokens(tokens).byte_budget()
 }
 
-/// The steps of the last `update_plan` call, when any is not completed.
+/// The text of a context message an earlier compaction put back, when `item` is one.
+fn restored_text(item: &ResponseItem) -> Option<&str> {
+    let ResponseItem::Message { role, content, .. } = item else {
+        return None;
+    };
+    if role != "user" {
+        return None;
+    }
+    content.iter().find_map(|part| match part {
+        ContentItem::InputText { text }
+            if crate::context::internal_context_source(text) == Some(SOURCE) =>
+        {
+            Some(text.as_str())
+        }
+        _ => None,
+    })
+}
+
+/// Whether `item` is context an earlier compaction put back: the next compaction leaves it out of the summary
+/// request and puts back what is still in use itself.
+pub(crate) fn is_restored_context(item: &ResponseItem) -> bool {
+    restored_text(item).is_some()
+}
+
+/// The plan and skills part of a restored context message (the files come last and are not searched, so their
+/// contents cannot be taken for a plan or a skill).
+fn restored_head(text: &str) -> &str {
+    text.split(FILES_HEADING).next().unwrap_or(text)
+}
+
+fn between<'t>(text: &'t str, open: &str, close: &str) -> Option<&'t str> {
+    let start = text.find(open)? + open.len();
+    let end = text[start..].find(close)? + start;
+    Some(&text[start..end])
+}
+
+/// The plan to put back: the steps of the last `update_plan` call when any is not completed, or, when an earlier
+/// compaction came after that call, the plan it put back.
 pub(crate) fn unfinished_plan<'a>(
     items: impl DoubleEndedIterator<Item = &'a ResponseItem>,
 ) -> Option<String> {
-    let arguments = items.rev().find_map(|item| match item {
-        ResponseItem::FunctionCall {
+    for item in items.rev() {
+        if let ResponseItem::FunctionCall {
             name, arguments, ..
-        } if name == PLAN_TOOL => Some(arguments),
-        _ => None,
-    })?;
+        } = item
+            && name == PLAN_TOOL
+        {
+            return plan_lines(arguments);
+        }
+        if let Some(text) = restored_text(item) {
+            return between(restored_head(text), PLAN_OPEN_TAG, PLAN_CLOSE_TAG)
+                .map(|plan| plan.trim().to_string())
+                .filter(|plan| !plan.is_empty());
+        }
+    }
+    None
+}
+
+fn plan_lines(arguments: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(arguments).ok()?;
     let steps = value.get("plan")?.as_array()?;
     let status = |step: &serde_json::Value| {
@@ -209,7 +261,24 @@ pub(crate) fn unfinished_plan<'a>(
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-/// The instructions of the skills used in the conversation, latest first, each cut to its limit, within the budget.
+/// The `<skill>` blocks of a restored context message, in order.
+fn restored_skills(text: &str) -> Vec<&str> {
+    let mut head = restored_head(text);
+    let mut out = Vec::new();
+    while let Some(start) = head.find(SKILL_OPEN_TAG) {
+        let rest = &head[start..];
+        let Some(end) = rest.find(SKILL_CLOSE_TAG) else {
+            break;
+        };
+        let end = end + SKILL_CLOSE_TAG.len();
+        out.push(&rest[..end]);
+        head = &rest[end..];
+    }
+    out
+}
+
+/// The instructions of the skills used in the conversation (including those an earlier compaction put back),
+/// latest first, each cut to its limit, within the budget.
 pub(crate) fn used_skills<'a>(
     items: impl DoubleEndedIterator<Item = &'a ResponseItem>,
     budget: usize,
@@ -223,14 +292,25 @@ pub(crate) fn used_skills<'a>(
         if role != "user" {
             continue;
         }
-        for part in content {
-            let ContentItem::InputText { text } = part else {
-                continue;
-            };
-            if !text.trim_start().starts_with(SKILL_OPEN_TAG) || out.contains(text) {
+        let candidates: Vec<&str> = match restored_text(item) {
+            Some(text) => restored_skills(text),
+            None => content
+                .iter()
+                .filter_map(|part| match part {
+                    ContentItem::InputText { text }
+                        if text.trim_start().starts_with(SKILL_OPEN_TAG) =>
+                    {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect(),
+        };
+        for text in candidates {
+            let cut = truncate_text(text, TruncationPolicy::Tokens(MAX_TOKENS_PER_SKILL));
+            if out.contains(&cut) {
                 continue;
             }
-            let cut = truncate_text(text, TruncationPolicy::Tokens(MAX_TOKENS_PER_SKILL));
             let tokens = approx_token_count(&cut);
             if used + tokens > budget {
                 return out;
@@ -254,18 +334,9 @@ fn render(
         "The conversation was just compacted. To carry on without reading them again, here is what was in use \
          before it, restored as it is now.\n",
     );
-    if !files.is_empty() {
-        body.push_str("\nFiles read or changed last (current contents, numbered like Read; a cut file says where to continue):\n");
-        for (file, shown) in files {
-            body.push_str(&format!(
-                "\n<file path=\"{}\">\n{shown}</file>\n",
-                file.key.1
-            ));
-        }
-    }
     if let Some(plan) = plan {
         body.push_str(&format!(
-            "\nYour plan (last update_plan; keep it up to date with update_plan):\n{plan}\n"
+            "\nYour plan (last update_plan; keep it up to date with update_plan):\n{PLAN_OPEN_TAG}\n{plan}\n{PLAN_CLOSE_TAG}\n"
         ));
     }
     if !skills.is_empty() {
@@ -274,6 +345,18 @@ fn render(
             body.push('\n');
             body.push_str(skill);
             body.push('\n');
+        }
+    }
+    if !files.is_empty() {
+        body.push_str(FILES_HEADING);
+        body.push_str(
+            " (current contents, numbered like Read; a cut file says where to continue):\n",
+        );
+        for (file, shown) in files {
+            body.push_str(&format!(
+                "\n<file path=\"{}\">\n{shown}</file>\n",
+                file.key.1
+            ));
         }
     }
     Some(body)

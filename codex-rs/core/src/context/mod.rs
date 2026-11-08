@@ -97,6 +97,7 @@ pub(crate) use inter_agent_message::InterAgentMessageType;
 pub use internal_model_context::InternalContextSource;
 pub use internal_model_context::InternalModelContextFragment;
 pub use internal_model_context::InvalidInternalContextSource;
+pub(crate) use internal_model_context::internal_context_source;
 pub(crate) use legacy_apply_patch_exec_command_warning::LegacyApplyPatchExecCommandWarning;
 pub(crate) use legacy_model_mismatch_warning::LegacyModelMismatchWarning;
 pub(crate) use legacy_unified_exec_process_limit_warning::LegacyUnifiedExecProcessLimitWarning;

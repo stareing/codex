@@ -20,6 +20,12 @@ impl UnsupportedMedia {
         content_kind: "images.omitted_for_compaction",
     };
 
+    /// Audio left out of a compaction request, for the same reason as `IMAGE_FOR_SUMMARY`.
+    pub(crate) const AUDIO_FOR_SUMMARY: Self = Self {
+        text: "[audio]",
+        content_kind: "audio.omitted_for_compaction",
+    };
+
     pub(crate) const AUDIO: Self = Self {
         text: "audio content omitted because you do not support audio input",
         content_kind: "audio.unsupported",

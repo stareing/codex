@@ -533,15 +533,23 @@ impl ContextManager {
             .collect()
     }
 
-    /// The history as a compaction request sends it: normalized, with every image replaced by `[image]`.
+    /// The history as a compaction request sends it: normalized, every image replaced by `[image]` and every
+    /// audio clip by `[audio]` (the summary only needs to know they were there), and without the context an
+    /// earlier compaction put back, which this compaction puts back again (`is_put_back`).
     pub(crate) fn for_compaction_prompt(
         self,
         input_modalities: &[InputModality],
+        is_put_back: impl Fn(&ResponseItem) -> bool,
     ) -> Vec<ResponseItem> {
         let mut items = self.for_prompt_annotated(input_modalities);
+        items.retain(|envelope| !is_put_back(&envelope.item));
         normalize::replace_images(
             &mut items,
             crate::context::UnsupportedMedia::IMAGE_FOR_SUMMARY,
+        );
+        normalize::replace_audio(
+            &mut items,
+            crate::context::UnsupportedMedia::AUDIO_FOR_SUMMARY,
         );
         items
             .into_iter()

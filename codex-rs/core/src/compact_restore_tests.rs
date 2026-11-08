@@ -1,4 +1,7 @@
 use super::*;
+use crate::context::ContextualUserFragment;
+use crate::context::InternalContextSource;
+use crate::context::InternalModelContextFragment;
 use pretty_assertions::assert_eq;
 
 fn plan_call(arguments: &str) -> ResponseItem {
@@ -83,4 +86,47 @@ fn nothing_to_restore_adds_nothing() {
     assert!(body.contains("- [pending] x"), "{body}");
     assert!(body.contains("<skill>s</skill>"), "{body}");
     assert!(!body.contains("<file"), "{body}");
+}
+
+fn restored(body: &str) -> ResponseItem {
+    ContextualUserFragment::into(InternalModelContextFragment::new(
+        InternalContextSource::from_static(SOURCE),
+        body,
+    ))
+}
+
+#[test]
+fn a_second_compaction_keeps_what_the_first_one_put_back() {
+    let skill = "<skill>\n<name>a</name>\nalpha\n</skill>";
+    let plan = plan_call(r#"{"plan":[{"step":"fix it","status":"in_progress"}]}"#);
+    let first = render(
+        &[],
+        unfinished_plan([plan].iter()).as_deref(),
+        &[skill.to_string()],
+    )
+    .expect("body");
+    // After the first compaction only the summary and the restored context are left.
+    let history = [user("summary"), restored(&first)];
+    assert!(is_restored_context(&history[1]));
+    assert!(!is_restored_context(&history[0]));
+    assert_eq!(
+        unfinished_plan(history.iter()).as_deref(),
+        Some("- [in_progress] fix it")
+    );
+    assert_eq!(used_skills(history.iter(), 10_000), vec![skill.to_string()]);
+
+    // A later update_plan wins over the restored plan; a finished one means no plan.
+    let done = plan_call(r#"{"plan":[{"step":"fix it","status":"completed"}]}"#);
+    let later = [restored(&first), done];
+    assert_eq!(unfinished_plan(later.iter()), None);
+}
+
+#[test]
+fn file_contents_are_never_taken_for_a_plan_or_a_skill() {
+    let body = format!(
+        "intro\n{FILES_HEADING}:\n<file path=\"x\">\n<plan>\nfake\n</plan>\n<skill>fake</skill>\n</file>\n"
+    );
+    let history = [restored(&body)];
+    assert_eq!(unfinished_plan(history.iter()), None);
+    assert_eq!(used_skills(history.iter(), 10_000), Vec::<String>::new());
 }

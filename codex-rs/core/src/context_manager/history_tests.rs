@@ -3309,6 +3309,9 @@ fn a_compaction_prompt_carries_no_images_even_for_a_model_that_reads_them() {
                     image: image(),
                     detail: Some(DEFAULT_IMAGE_DETAIL),
                 },
+                ContentItem::InputAudio {
+                    audio_url: "data:audio/wav;base64,BBBB".to_string(),
+                },
             ],
             phase: None,
             internal_chat_message_metadata_passthrough: None,
@@ -3336,7 +3339,11 @@ fn a_compaction_prompt_carries_no_images_even_for_a_model_that_reads_them() {
             internal_chat_message_metadata_passthrough: None,
         },
     ]);
-    let modalities = [InputModality::Text, InputModality::Image];
+    let modalities = [
+        InputModality::Text,
+        InputModality::Image,
+        InputModality::Audio,
+    ];
 
     let normal = serde_json::to_string(&history.clone().for_prompt(&modalities)).expect("json");
     assert!(
@@ -3344,9 +3351,11 @@ fn a_compaction_prompt_carries_no_images_even_for_a_model_that_reads_them() {
         "a normal turn keeps them"
     );
 
-    let compaction =
-        serde_json::to_string(&history.for_compaction_prompt(&modalities)).expect("json");
+    let compaction = serde_json::to_string(&history.for_compaction_prompt(&modalities, |_| false))
+        .expect("json");
     assert!(!compaction.contains("data:image/png"), "{compaction}");
     assert_eq!(compaction.matches("[image]").count(), 2, "{compaction}");
+    assert!(!compaction.contains("data:audio/wav"), "{compaction}");
+    assert_eq!(compaction.matches("[audio]").count(), 1, "{compaction}");
     assert!(compaction.contains("look"), "{compaction}");
 }

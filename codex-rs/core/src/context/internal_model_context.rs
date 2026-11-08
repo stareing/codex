@@ -119,6 +119,14 @@ impl ContextualUserFragment for InternalModelContextFragment {
     }
 }
 
+/// The source label of a hidden internal-context text, when `text` is one.
+pub(crate) fn internal_context_source(text: &str) -> Option<&str> {
+    let rest = text.trim_start().strip_prefix(CONTEXT_START_MARKER)?;
+    let rest = rest.strip_prefix(SOURCE_ATTR_START)?;
+    let (source, _) = rest.split_once(SOURCE_ATTR_END)?;
+    is_valid_source(source).then_some(source)
+}
+
 fn matches_legacy_goal_context(text: &str) -> bool {
     text.starts_with(LEGACY_GOAL_CONTEXT_START_MARKER)
         && text.ends_with(LEGACY_GOAL_CONTEXT_END_MARKER)

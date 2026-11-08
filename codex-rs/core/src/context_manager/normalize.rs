@@ -389,7 +389,11 @@ pub(crate) fn strip_audio_when_unsupported(
     if input_modalities.contains(&InputModality::Audio) {
         return;
     }
+    replace_audio(items, UnsupportedMedia::AUDIO);
+}
 
+/// Replaces every audio clip in messages and tool outputs with `placeholder`.
+pub(crate) fn replace_audio(items: &mut [ResponseItemEnvelope], placeholder: UnsupportedMedia) {
     for envelope in items.iter_mut() {
         match &mut envelope.item {
             ResponseItem::Message { .. } => {
@@ -398,7 +402,7 @@ pub(crate) fn strip_audio_when_unsupported(
                 };
                 for content_item in &mut content {
                     if matches!(content_item.content(), ContentItem::InputAudio { .. }) {
-                        *content_item = UnsupportedMedia::AUDIO.render_fragment().into_parts().1;
+                        *content_item = placeholder.render_fragment().into_parts().1;
                     }
                 }
                 let _ = set_annotated_content(&mut envelope.item, content);
@@ -412,7 +416,7 @@ pub(crate) fn strip_audio_when_unsupported(
                             FunctionCallOutputContentItem::InputAudio { .. }
                         ) {
                             *content_item = FunctionCallOutputContentItem::InputText {
-                                text: UnsupportedMedia::AUDIO.render(),
+                                text: placeholder.render(),
                             };
                         }
                     }
