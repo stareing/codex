@@ -4,7 +4,6 @@
 use anyhow::Result;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
-use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::mount_function_call_agent_response;
 use core_test_support::responses::mount_sse_once;
@@ -228,10 +227,14 @@ async fn a_compaction_puts_the_files_read_last_back_in_context() -> Result<()> {
         .write_file("kept.txt", "KEEP-ME-LINE-1\nCHANGED-LINE-2\n")
         .await?;
 
+    // The test provider compacts remotely: the answer is one opaque compaction item.
     mount_sse_once(
         harness.server(),
         sse(vec![
-            ev_assistant_message("m1", "SUMMARY"),
+            json!({
+                "type": "response.output_item.done",
+                "item": { "type": "compaction", "encrypted_content": "SUMMARY" },
+            }),
             ev_completed("r1"),
         ]),
     )
