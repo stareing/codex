@@ -369,11 +369,11 @@ async fn set_skill_enabled(
         .map_err(|err| io_failure("could not write config.toml", format!("{err:#}")))
 }
 
-fn load_ledger(codex_home: &Path) -> Result<Ledger, CatalogError> {
+pub(crate) fn load_ledger(codex_home: &Path) -> Result<Ledger, CatalogError> {
     Ledger::load(codex_home).map_err(|err| io_failure("could not read the install list", err))
 }
 
-fn save_ledger(codex_home: &Path, ledger: &Ledger) -> Result<(), CatalogError> {
+pub(crate) fn save_ledger(codex_home: &Path, ledger: &Ledger) -> Result<(), CatalogError> {
     ledger
         .save(codex_home)
         .map_err(|err| io_failure("could not write the install list", err))
@@ -453,7 +453,7 @@ fn not_installable(spec: &InstallSpec) -> CatalogError {
     err
 }
 
-fn now_rfc3339() -> String {
+pub(crate) fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
@@ -625,6 +625,7 @@ pub(crate) async fn install(
         enabled: true,
         trust: installed.trust.clone(),
         env_file: header_values.keys().cloned().collect(),
+        withdrawn: None,
     };
     let mut ledger = load_ledger(codex_home)?;
     ledger.upsert(entry.clone());
@@ -698,15 +699,12 @@ pub(crate) struct LocalChange {
     pub(crate) site_warning: Option<CatalogError>,
 }
 
-/// `equip` / `unequip`: flips `enabled` locally, then tells the site.
-pub(crate) async fn set_enabled(
+/// Turns `entry` on or off in config.toml (the ledger is the caller's).
+pub(crate) async fn apply_enabled(
     codex_home: &Path,
-    client: &CatalogClient,
-    selector: &str,
+    entry: &LedgerEntry,
     enabled: bool,
-) -> Result<LocalChange, CatalogError> {
-    let mut ledger = load_ledger(codex_home)?;
-    let mut entry = find_entry(&ledger, selector)?;
+) -> Result<(), CatalogError> {
     match entry.kind {
         Kind::Mcp => {
             let mut servers = load_servers(codex_home).await?;
@@ -729,8 +727,32 @@ pub(crate) async fn set_enabled(
                 .unwrap_or_else(|| entry.slug.clone());
             set_skill_enabled(codex_home, &skill_name, enabled).await?;
         }
-        Kind::Cli => return Err(cli_in_ledger(&entry)),
+        Kind::Cli => return Err(cli_in_ledger(entry)),
     }
+    Ok(())
+}
+
+/// `equip` / `unequip`: flips `enabled` locally, then tells the site. An item the site withdrew
+/// cannot be turned on (`sync-installed` does that once the site offers it again).
+pub(crate) async fn set_enabled(
+    codex_home: &Path,
+    client: &CatalogClient,
+    selector: &str,
+    enabled: bool,
+) -> Result<LocalChange, CatalogError> {
+    let mut ledger = load_ledger(codex_home)?;
+    let mut entry = find_entry(&ledger, selector)?;
+    if let (true, Some(withdrawal)) = (enabled, &entry.withdrawn) {
+        return Err(local(
+            "withdrawn",
+            format!(
+                "the site withdrew `{}` ({}); it stays off until the site offers it again \
+                 (`onigio-agent sync-installed`), or remove it",
+                entry.name, withdrawal.reason
+            ),
+        ));
+    }
+    apply_enabled(codex_home, &entry, enabled).await?;
     ledger.set_enabled(&entry.reference, enabled);
     save_ledger(codex_home, &ledger)?;
     entry.enabled = enabled;
@@ -800,6 +822,8 @@ pub(crate) struct ListedItem {
     pub(crate) on_site: bool,
     /// Not reviewed by the site: reinstalling (an update included) asks again.
     pub(crate) reconfirm_on_update: bool,
+    /// Why the site withdrew it (recorded by `sync-installed`, else as the site says now).
+    pub(crate) withdrawn_reason: Option<String>,
 }
 
 /// The ledger, merged with the site's `installed/` when it could be read (`site = None` when
@@ -827,6 +851,11 @@ pub(crate) fn merge_listing(ledger: &Ledger, site: Option<&[SiteInstalled]>) -> 
                 update_available: remote.is_some_and(|row| row.update_available),
                 on_site: remote.is_some(),
                 reconfirm_on_update: entry.reconfirm_on_update(),
+                withdrawn_reason: entry
+                    .withdrawn
+                    .as_ref()
+                    .map(|w| w.reason.clone())
+                    .or_else(|| remote.and_then(|row| row.withdrawn_reason())),
             }
         })
         .collect();
@@ -844,6 +873,7 @@ pub(crate) fn merge_listing(ledger: &Ledger, site: Option<&[SiteInstalled]>) -> 
                 update_available: row.update_available,
                 on_site: true,
                 reconfirm_on_update: !row.reference.starts_with("store:"),
+                withdrawn_reason: row.withdrawn_reason(),
             });
         }
     }
