@@ -82,6 +82,7 @@ async fn persistent_async_message_guidance_follows_tool_availability(
         })
         .with_config(|config| {
             config.model_reasoning_effort = Some(ReasoningEffort::Persistent);
+            config.experimental_request_user_input_enabled = true;
         })
         .build_with_auto_env(&server)
         .await?;
@@ -118,6 +119,15 @@ async fn persistent_async_message_guidance_follows_tool_availability(
             .iter()
             .any(|tool| tool["name"] == "request_user_input_async"),
         expect_tool_guidance,
+    );
+    // Only one question tool: the blocking one only where the asynchronous one is not offered.
+    assert_eq!(
+        request.body_json()["tools"]
+            .as_array()
+            .expect("request tools")
+            .iter()
+            .any(|tool| tool["name"] == "request_user_input"),
+        !expect_tool_guidance,
     );
 
     Ok(())

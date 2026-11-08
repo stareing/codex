@@ -1171,16 +1171,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         );
     }
 
-    if turn_context.config.experimental_request_user_input_enabled {
-        registry.add_with_exposure(
-            RequestUserInputHandler {
-                available_modes: request_user_input_available_modes(features),
-            },
-            ToolExposure::DirectModelOnly,
-        );
-    }
-
-    if !turn_context.session_source.is_non_root_agent()
+    let async_questions = !turn_context.session_source.is_non_root_agent()
         && context
             .model_info
             .experimental_supported_tools
@@ -1191,8 +1182,20 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
                     tool.as_str(),
                     "request_user_input_async" | "send_user_message_async"
                 )
-            })
-    {
+            });
+
+    // One way to ask the user: where the model has the asynchronous question tool, the blocking one is not offered
+    // beside it (the model would otherwise see two tools for the same thing).
+    if turn_context.config.experimental_request_user_input_enabled && !async_questions {
+        registry.add_with_exposure(
+            RequestUserInputHandler {
+                available_modes: request_user_input_available_modes(features),
+            },
+            ToolExposure::DirectModelOnly,
+        );
+    }
+
+    if async_questions {
         let model_messages = ResolvedModelMessages::from_model(context.model_info);
         registry.add_with_exposure(
             RequestUserInputAsyncHandler {
