@@ -72,7 +72,7 @@ pub async fn update_from_cli(
             .ok()
             .map(|info| info.app_server_version),
         managed_codex_path,
-        message: "The CLI package is selected and pinned. Run `onigio-agent app-server daemon update` to return to production updates.".to_string(),
+        message: "The CLI package is selected and pinned. Run `onigio app-server daemon update` to return to production updates.".to_string(),
     }))
 }
 
@@ -118,7 +118,7 @@ async fn prepare_from_package(
     } else {
         anyhow::ensure!(
             previous_root.join("current").symlink_metadata().is_ok(),
-            "no daemon package is selected; run `onigio-agent app-server daemon start` first"
+            "no daemon package is selected; run `onigio app-server daemon start` first"
         );
     }
     std::fs::create_dir_all(&root)?;
@@ -129,7 +129,7 @@ async fn prepare_from_package(
     let backend = daemon.running_backend_instance(settings).await?;
     anyhow::ensure!(
         backend.is_some() || crate::client::probe(&daemon.socket_path).await.is_err(),
-        "app server is running but is not managed by onigio-agent app-server daemon"
+        "app server is running but is not managed by onigio app-server daemon"
     );
     let selected = managed_install::managed_codex_bin(home);
     let previous_release = previous_root.join("current").canonicalize().ok();
@@ -351,7 +351,7 @@ async fn prepare_from_package(
             ..daemon.clone()
         };
         selected.start_managed_backend(settings).await.context(
-            "daemon package selected but could not start; retry with `onigio-agent app-server daemon start`",
+            "daemon package selected but could not start; retry with `onigio app-server daemon start`",
         )?;
         selected.wait_until_ready().await?;
     }

@@ -1,0 +1,13 @@
+---
+source: cli/src/main.rs
+assertion_line: 3324
+expression: "errors.join(\"\\n\")"
+---
+codex --worktree login: `--worktree` supports new interactive sessions, `onigio fork`, `onigio exec`, and `onigio exec fork`
+codex fork --worktree: `onigio fork --worktree` requires an explicit session ID
+codex fork --worktree --last: `onigio fork --worktree` requires an explicit session ID
+codex exec resume --worktree session: `--worktree` cannot resume an existing session; use `onigio exec fork --worktree`
+codex exec review --worktree: `--worktree` is not supported for code review
+codex resume --worktree session: `--worktree` supports new interactive sessions, `onigio fork`, `onigio exec`, and `onigio exec fork`
+codex archive session --worktree: `--worktree` supports new interactive sessions, `onigio fork`, `onigio exec`, and `onigio exec fork`
+codex queue --thread session --message hi --worktree: `--worktree` supports new interactive sessions, `onigio fork`, `onigio exec`, and `onigio exec fork`

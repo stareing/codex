@@ -303,10 +303,10 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         }
         match command.as_ref() {
             Some(ExecCommand::Resume(_)) => {
-                anyhow::bail!("--worktree is not supported with `onigio-agent exec resume`");
+                anyhow::bail!("--worktree is not supported with `onigio exec resume`");
             }
             Some(ExecCommand::Review(_)) => {
-                anyhow::bail!("--worktree is not supported with `onigio-agent exec review`");
+                anyhow::bail!("--worktree is not supported with `onigio exec review`");
             }
             Some(ExecCommand::Fork(_)) | None => {}
         }

@@ -71,7 +71,7 @@ async fn sandbox_blocks_terminal_input_injection() -> anyhow::Result<()> {
     )
     .await?;
 
-    let codex = codex_utils_cargo_bin::cargo_bin("onigio-agent")?;
+    let codex = codex_utils_cargo_bin::cargo_bin("onigio")?;
     run_probe(
         &codex.to_string_lossy(),
         vec![

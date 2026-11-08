@@ -196,7 +196,7 @@ fn session_start_error_surfaces_archived_guidance_without_rollout_path() {
         history_mode: None,
     };
     let expected = format!(
-        "session {thread_id} is archived. Run `onigio-agent unarchive {thread_id}` to unarchive it first."
+        "session {thread_id} is archived. Run `onigio unarchive {thread_id}` to unarchive it first."
     );
 
     for action in ["resume", "fork"] {

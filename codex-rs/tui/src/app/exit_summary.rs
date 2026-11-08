@@ -32,7 +32,7 @@ impl App {
         let disconnect_info = thread_id.and_then(|_| {
             let command = match &self.app_server_target {
                 AppServerTarget::Embedded => return None,
-                AppServerTarget::LocalDaemon { .. } => vec!["onigio-agent".to_string()],
+                AppServerTarget::LocalDaemon { .. } => vec!["onigio".to_string()],
                 AppServerTarget::Remote { endpoint } => {
                     let address = match endpoint {
                         RemoteAppServerEndpoint::WebSocket { websocket_url, .. } => {
@@ -49,7 +49,7 @@ impl App {
                             format!("unix://{}", socket_path.display())
                         }
                     };
-                    vec!["onigio-agent".to_string(), "--remote".to_string(), address]
+                    vec!["onigio".to_string(), "--remote".to_string(), address]
                 }
             };
             let stop_hint = self
@@ -138,12 +138,12 @@ impl AppExitInfo {
             lines.push("To continue this session, run:".to_string());
             lines.push(format!(
                 "  {}",
-                color_command(format!("onigio-agent resume {}", thread.thread_id)),
+                color_command(format!("onigio resume {}", thread.thread_id)),
             ));
             if let Some(thread_name) = thread.thread_name.filter(|name| !name.is_empty()) {
                 lines.push(format!(
                     "Or run {} and select {}.",
-                    color_command("onigio-agent resume".to_string()),
+                    color_command("onigio resume".to_string()),
                     color_command(thread_name),
                 ));
             }

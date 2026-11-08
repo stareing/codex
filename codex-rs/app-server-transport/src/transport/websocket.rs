@@ -55,10 +55,7 @@ fn colorize(text: &str, style: Style) -> String {
 
 #[allow(clippy::print_stderr)]
 fn print_websocket_startup_banner(addr: SocketAddr) {
-    let title = colorize(
-        "onigio-agent app-server (WebSockets)",
-        Style::new().bold().cyan(),
-    );
+    let title = colorize("onigio app-server (WebSockets)", Style::new().bold().cyan());
     let listening_label = colorize("listening on:", Style::new().dimmed());
     let listen_url = colorize(&format!("ws://{addr}"), Style::new().green());
     let ready_label = colorize("readyz:", Style::new().dimmed());

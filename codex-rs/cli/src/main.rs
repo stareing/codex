@@ -123,8 +123,8 @@ use codex_terminal_detection::TerminalName;
     // The executable is sometimes invoked via a platform‑specific name like
     // `codex-x86_64-unknown-linux-musl`, but the help output should always use
     // the generic `codex` command name that users run.
-    bin_name = "onigio-agent",
-    override_usage = "onigio-agent [OPTIONS] [PROMPT]\n       onigio-agent [OPTIONS] <COMMAND> [ARGS]"
+    bin_name = "onigio",
+    override_usage = "onigio [OPTIONS] [PROMPT]\n       onigio [OPTIONS] <COMMAND> [ARGS]"
 )]
 struct MultitoolCli {
     #[clap(flatten)]
@@ -510,14 +510,14 @@ struct LoginCommand {
     #[arg(
         hide = true,
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | onigio-agent login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | onigio login --with-api-key`)"
     )]
     with_api_key: bool,
 
     #[arg(
         hide = true,
         long = "with-access-token",
-        help = "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | onigio-agent login --with-access-token`)"
+        help = "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | onigio login --with-access-token`)"
     )]
     with_access_token: bool,
 
@@ -901,7 +901,7 @@ fn run_update_command() -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
     {
         anyhow::bail!(
-            "`onigio-agent update` is not available in debug builds. Install a release build of Codex to use this command."
+            "`onigio update` is not available in debug builds. Install a release build of Codex to use this command."
         );
     }
 
@@ -1109,7 +1109,7 @@ async fn cli_main(
         && let Some(agents_endpoint) = &options.remote.remote
         && root_endpoint != agents_endpoint
     {
-        anyhow::bail!("`onigio-agent agents` received conflicting remote server endpoints");
+        anyhow::bail!("`onigio agents` received conflicting remote server endpoints");
     }
     let root_remote = agents_options
         .and_then(|options| options.remote.remote.clone())
@@ -1140,9 +1140,7 @@ async fn cli_main(
             );
             if open_agents_overview {
                 if interactive.prompt.is_some() || !interactive.images.is_empty() {
-                    anyhow::bail!(
-                        "`onigio-agent agents` does not accept an initial prompt or images"
-                    );
+                    anyhow::bail!("`onigio agents` does not accept an initial prompt or images");
                 }
                 if root_remote.is_some()
                     && (interactive.oss
@@ -1160,12 +1158,12 @@ async fn cli_main(
                             }))
                 {
                     anyhow::bail!(
-                        "`onigio-agent agents` cannot apply local provider or additional-directory overrides to a remote server"
+                        "`onigio agents` cannot apply local provider or additional-directory overrides to a remote server"
                     );
                 }
                 if is_workload_identity_selected() {
                     anyhow::bail!(
-                        "`onigio-agent agents` is unavailable while workload identity is active"
+                        "`onigio agents` is unavailable while workload identity is active"
                     );
                 }
                 if root_remote.is_none() {
@@ -1174,7 +1172,7 @@ async fn cli_main(
                         root_remote_auth_token_env.clone(),
                     )?;
                     #[cfg(not(any(unix, windows)))]
-                    anyhow::bail!("`onigio-agent agents` requires `--remote` on this platform");
+                    anyhow::bail!("`onigio agents` requires `--remote` on this platform");
                 }
                 interactive.agents_overview = true;
             }
@@ -1657,7 +1655,7 @@ async fn cli_main(
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | onigio-agent login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | onigio login --with-api-key`."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
@@ -1805,7 +1803,7 @@ async fn cli_main(
             #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
             {
                 let _ = loader_overrides;
-                anyhow::bail!("`onigio-agent sandbox` is not supported on this operating system");
+                anyhow::bail!("`onigio sandbox` is not supported on this operating system");
             }
         }
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
@@ -1985,7 +1983,7 @@ fn profile_v2_for_subcommand<'a>(
             subcommand: DebugSubcommand::PromptInput(_),
         }) => Ok(Some(profile_v2)),
         _ => anyhow::bail!(
-            "--profile only applies to runtime commands and `onigio-agent mcp`: `onigio-agent`, `onigio-agent exec`, `onigio-agent review`, `onigio-agent resume`, `onigio-agent queue`, `onigio-agent archive`, `onigio-agent delete`, `onigio-agent unarchive`, `onigio-agent fork`, `onigio-agent mcp`, `onigio-agent sandbox`, and `onigio-agent debug prompt-input`."
+            "--profile only applies to runtime commands and `onigio mcp`: `onigio`, `onigio exec`, `onigio review`, `onigio resume`, `onigio queue`, `onigio archive`, `onigio delete`, `onigio unarchive`, `onigio fork`, `onigio mcp`, `onigio sandbox`, and `onigio debug prompt-input`."
         ),
     }
 }
@@ -2281,12 +2279,12 @@ fn reject_unsupported_worktree_for_subcommand(
         None => Ok(()),
         Some(Subcommand::Fork(command)) if command.session_id.is_some() && !command.last => Ok(()),
         Some(Subcommand::Fork(_)) => {
-            anyhow::bail!("`onigio-agent fork --worktree` requires an explicit session ID")
+            anyhow::bail!("`onigio fork --worktree` requires an explicit session ID")
         }
         Some(Subcommand::Exec(command)) => match &command.command {
             None | Some(ExecCommand::Fork(_)) => Ok(()),
             Some(ExecCommand::Resume(_)) => anyhow::bail!(
-                "`--worktree` cannot resume an existing session; use `onigio-agent exec fork --worktree`"
+                "`--worktree` cannot resume an existing session; use `onigio exec fork --worktree`"
             ),
             Some(ExecCommand::Review(_)) => {
                 anyhow::bail!("`--worktree` is not supported for code review")
@@ -2294,7 +2292,7 @@ fn reject_unsupported_worktree_for_subcommand(
         },
         _ => {
             anyhow::bail!(
-                "`--worktree` supports new interactive sessions, `onigio-agent fork`, `onigio-agent exec`, and `onigio-agent exec fork`"
+                "`--worktree` supports new interactive sessions, `onigio fork`, `onigio exec`, and `onigio exec fork`"
             )
         }
     }
@@ -2389,7 +2387,7 @@ fn reject_strict_config_for_unsupported_subcommand(
     subcommand: &str,
 ) -> anyhow::Result<()> {
     if strict_config {
-        anyhow::bail!("`--strict-config` is not supported for `onigio-agent {subcommand}`");
+        anyhow::bail!("`--strict-config` is not supported for `onigio {subcommand}`");
     }
     Ok(())
 }
@@ -2487,7 +2485,7 @@ async fn run_interactive_tui(
     if interactive.no_daemon {
         if interactive.agents_overview {
             return Ok(AppExitInfo::fatal(
-                "--no-daemon cannot be used with onigio-agent agents. The agents overview requires a shared server. Use onigio-agent --no-daemon to work without it.",
+                "--no-daemon cannot be used with onigio agents. The agents overview requires a shared server. Use onigio --no-daemon to work without it.",
             ));
         }
         if remote.is_some() {
@@ -2533,7 +2531,7 @@ async fn run_interactive_tui(
         codex_app_server_daemon::run(AppServerLifecycleCommand::Start)
             .await
             .map_err(|err| std::io::Error::other(format!(
-                "{err:#}\nThe agents overview requires a shared server. Use onigio-agent --no-daemon to work without it."
+                "{err:#}\nThe agents overview requires a shared server. Use onigio --no-daemon to work without it."
             )))?;
     }
 
@@ -2795,7 +2793,7 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
 
 fn print_completion(cmd: CompletionCommand) {
     let mut app = MultitoolCli::command();
-    let name = "onigio-agent";
+    let name = "onigio";
     generate(cmd.shell, &mut app, name, &mut std::io::stdout());
 }
 
@@ -3528,15 +3526,15 @@ mod tests {
     fn plugin_marketplace_help_uses_plugin_namespace() {
         let help = help_from_args(&["codex", "plugin", "marketplace", "--help"]);
         assert!(
-            help.contains("Usage: onigio-agent plugin marketplace [OPTIONS] <COMMAND>"),
+            help.contains("Usage: onigio plugin marketplace [OPTIONS] <COMMAND>"),
             "{help}"
         );
 
         for (subcommand, usage) in [
-            ("add", "Usage: onigio-agent plugin marketplace add"),
-            ("list", "Usage: onigio-agent plugin marketplace list"),
-            ("upgrade", "Usage: onigio-agent plugin marketplace upgrade"),
-            ("remove", "Usage: onigio-agent plugin marketplace remove"),
+            ("add", "Usage: onigio plugin marketplace add"),
+            ("list", "Usage: onigio plugin marketplace list"),
+            ("upgrade", "Usage: onigio plugin marketplace upgrade"),
+            ("remove", "Usage: onigio plugin marketplace remove"),
         ] {
             let help = help_from_args(&["codex", "plugin", "marketplace", subcommand, "--help"]);
             assert!(help.contains(usage), "{help}");
@@ -3812,7 +3810,7 @@ mod tests {
                 );
                 exit_info.disconnect_info = Some(codex_tui::DisconnectInfo {
                     command: vec![
-                        "onigio-agent".to_string(),
+                        "onigio".to_string(),
                         "--remote".to_string(),
                         "wss://example.com:443/".to_string(),
                     ],
@@ -3829,8 +3827,8 @@ mod tests {
             vec![
                 "Disconnected from this task. Any running work continues.",
                 "To reconnect, run:",
-                "  onigio-agent --remote wss://example.com:443/ --remote-auth-token-env CODEX_REMOTE_TOKEN resume 123e4567-e89b-12d3-a456-426614174000",
-                "Stop the current turn: run onigio-agent --remote wss://example.com:443/ --remote-auth-token-env CODEX_REMOTE_TOKEN agents, select this task, and press ctrl + x.",
+                "  onigio --remote wss://example.com:443/ --remote-auth-token-env CODEX_REMOTE_TOKEN resume 123e4567-e89b-12d3-a456-426614174000",
+                "Stop the current turn: run onigio --remote wss://example.com:443/ --remote-auth-token-env CODEX_REMOTE_TOKEN agents, select this task, and press ctrl + x.",
                 "Token usage so far: total=2 input=0 output=2",
             ]
         );
@@ -3892,7 +3890,7 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2".to_string(),
                 "To continue this session, run:".to_string(),
-                "  onigio-agent resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
+                "  onigio resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
             ]
         );
     }
@@ -3907,7 +3905,7 @@ mod tests {
                 insta::assert_snapshot!(lines.join("\n"), @"
                 Token usage: total=2 input=0 output=2
                 To continue this session, run:
-                  onigio-agent resume 123e4567-e89b-12d3-a456-426614174000
+                  onigio resume 123e4567-e89b-12d3-a456-426614174000
                 ");
             }
         }
@@ -3925,7 +3923,7 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36monigio-agent resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "  \u{1b}[36monigio resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
             ]
         );
     }
@@ -3940,8 +3938,8 @@ mod tests {
         insta::assert_snapshot!(lines.join("\n"), @"
         Token usage: total=2 input=0 output=2
         To continue this session, run:
-          onigio-agent resume 123e4567-e89b-12d3-a456-426614174000
-        Or run onigio-agent resume and select my-thread.
+          onigio resume 123e4567-e89b-12d3-a456-426614174000
+        Or run onigio resume and select my-thread.
         ");
     }
 
@@ -3957,8 +3955,8 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36monigio-agent resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
-                "Or run \u{1b}[36monigio-agent resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
+                "  \u{1b}[36monigio resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "Or run \u{1b}[36monigio resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
             ]
         );
     }
@@ -4361,7 +4359,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `onigio-agent mcp`"
+            "`--strict-config` is not supported for `onigio mcp`"
         );
 
         let cli = MultitoolCli::try_parse_from(["codex", "--strict-config", "remote-control"])
@@ -4374,7 +4372,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `onigio-agent remote-control`"
+            "`--strict-config` is not supported for `onigio remote-control`"
         );
     }
 
@@ -4390,7 +4388,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `onigio-agent app-server proxy`"
+            "`--strict-config` is not supported for `onigio app-server proxy`"
         );
     }
 

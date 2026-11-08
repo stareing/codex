@@ -148,7 +148,7 @@ pub async fn read_connector_metadata(
     );
     anyhow::ensure!(
         auth.get_account_id().is_some(),
-        "ChatGPT account ID not available, please re-run onigio-agent login"
+        "ChatGPT account ID not available, please re-run onigio login"
     );
 
     let store = ConnectorMetadataStore::new(

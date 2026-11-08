@@ -10,7 +10,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(
     version,
-    override_usage = "onigio-agent exec [OPTIONS] [PROMPT]\n       onigio-agent exec [OPTIONS] <COMMAND> [ARGS]"
+    override_usage = "onigio exec [OPTIONS] [PROMPT]\n       onigio exec [OPTIONS] <COMMAND> [ARGS]"
 )]
 pub struct Cli {
     /// Action to perform. If omitted, runs a new non-interactive session.

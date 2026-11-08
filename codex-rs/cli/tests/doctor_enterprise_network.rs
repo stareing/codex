@@ -82,7 +82,7 @@ trust_level = "trusted"
             .mount(&server)
             .await;
 
-        let output = Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?)
+        let output = Command::new(codex_utils_cargo_bin::cargo_bin("onigio")?)
             .current_dir(codex_home.path())
             .env("CODEX_HOME", codex_home.path())
             .env("NO_PROXY", "127.0.0.1,localhost")
@@ -159,7 +159,7 @@ async fn invalid_custom_ca_falls_back_to_system_roots() -> Result<()> {
         ),
     )?;
     for sandbox in [None, Some("seatbelt")] {
-        let mut command = Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?);
+        let mut command = Command::new(codex_utils_cargo_bin::cargo_bin("onigio")?);
         command
             .args(["doctor", "--json"])
             .env("CODEX_HOME", codex_home.path())
@@ -223,7 +223,7 @@ fn doctor_reports_macos_system_proxy_configuration_and_policy() -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn doctor_report(codex_home: &Path) -> Result<Value> {
-    let output = Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?)
+    let output = Command::new(codex_utils_cargo_bin::cargo_bin("onigio")?)
         .args(["doctor", "--json"])
         .env("CODEX_HOME", codex_home)
         .stdin(Stdio::null())

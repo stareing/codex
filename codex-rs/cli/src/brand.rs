@@ -1,12 +1,14 @@
-//! The program name users see. The cargo binary is `onigio-agent` (package `onigio-cli`); help,
-//! usage and `--version` still follow the name it was run as, so a copy run as `codex` keeps
-//! upstream's naming and home.
+//! The program name users see. The cargo binary is `onigio` (package `onigio-cli`); help, usage
+//! and `--version` still follow the name it was run as, so a copy run as `codex` keeps upstream's
+//! naming and home. `onigio-agent`, the name releases used before 11-08, is still recognised.
 
 use clap::ArgMatches;
 use clap::Command;
 
-/// The release name of the executable (`onigio-agent.exe` on Windows).
-pub const BRANDED_BIN_NAME: &str = "onigio-agent";
+/// The release name of the executable (`onigio.exe` on Windows).
+pub const BRANDED_BIN_NAME: &str = "onigio";
+/// Earlier releases' name, still branded (installed clients, older agent images).
+const LEGACY_BIN_NAME: &str = "onigio-agent";
 
 /// `Some(BRANDED_BIN_NAME)` when `argv0` is the branded executable, whatever its directory or
 /// extension; `None` keeps upstream's `codex` naming.
@@ -19,7 +21,7 @@ pub fn branded_name(argv0: Option<&std::ffi::OsStr>) -> Option<&'static str> {
         }
         _ => file,
     };
-    stem.eq_ignore_ascii_case(BRANDED_BIN_NAME)
+    (stem.eq_ignore_ascii_case(BRANDED_BIN_NAME) || stem.eq_ignore_ascii_case(LEGACY_BIN_NAME))
         .then_some(BRANDED_BIN_NAME)
 }
 
@@ -73,7 +75,7 @@ fn rebrand_texts(command: Command) -> Command {
     command.mut_subcommands(rebrand_texts)
 }
 
-/// Whether this process was started as the branded executable (`onigio-agent`).
+/// Whether this process was started as the branded executable (`onigio`).
 pub fn invoked_as_branded() -> bool {
     branded_name(std::env::args_os().next().as_deref()).is_some()
 }
@@ -172,10 +174,12 @@ mod tests {
     #[test]
     fn only_the_branded_executable_is_renamed() {
         for argv0 in [
+            "onigio",
+            "/usr/local/bin/onigio",
+            r"C:\Program Files\Onigio\agent\onigio.exe",
+            "ONIGIO.EXE",
             "onigio-agent",
-            "/usr/local/bin/onigio-agent",
             r"C:\Program Files\Onigio\onigio-agent.exe",
-            "ONIGIO-AGENT.EXE",
         ] {
             assert_eq!(
                 branded_name(Some(OsStr::new(argv0))),
@@ -188,6 +192,8 @@ mod tests {
             "/usr/bin/codex",
             "codex-x86_64-unknown-linux-gnu",
             "agent",
+            "onigio-agentx",
+            "onigio-desktop",
         ] {
             assert_eq!(branded_name(Some(OsStr::new(argv0))), None, "{argv0}");
         }
@@ -214,7 +220,7 @@ mod tests {
             command.render_help().to_string(),
             command.render_long_help().to_string(),
         ] {
-            assert!(help.contains("onigio-agent [OPTIONS] [PROMPT]"), "{help}");
+            assert!(help.contains("onigio [OPTIONS] [PROMPT]"), "{help}");
             assert!(!help.contains("codex [OPTIONS]"), "{help}");
             assert!(!help.contains("Codex"), "{help}");
             assert!(help.starts_with("Onigio agent"), "{help}");

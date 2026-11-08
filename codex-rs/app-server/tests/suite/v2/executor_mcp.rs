@@ -144,7 +144,7 @@ async fn selected_executor_discovers_browser_mcp_with_executor_only_bearer_token
     )?;
     // Browser auth tokens are not inherited by spawned executors, so use the production
     // WebSocket connection and put the token directly in the executor's environment.
-    let mut executor = Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?)
+    let mut executor = Command::new(codex_utils_cargo_bin::cargo_bin("onigio")?)
         .args(["exec-server", "--listen", "ws://127.0.0.1:0"])
         .stdout(Stdio::piped())
         .kill_on_drop(true)
@@ -314,7 +314,7 @@ async fn legacy_executor_blocks_plugin_host_credentials_and_keeps_host_owned_mcp
         }))?,
     )?;
 
-    let mut executor = Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?)
+    let mut executor = Command::new(codex_utils_cargo_bin::cargo_bin("onigio")?)
         .args(["exec-server", "--listen", "ws://127.0.0.1:0"])
         .stdout(Stdio::piped())
         .kill_on_drop(true)
@@ -571,7 +571,7 @@ async fn cached_executor_mcp_cannot_read_host_token_after_capability_downgrade()
             "[mcp_servers.cached_executor]\nurl = \"{mcp_url}\"\nbearer_token_env_var = \"{TOKEN_ENV}\"\nrequired = true\nstartup_timeout_sec = 3\n"
         ),
     )?;
-    let mut executor = Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?)
+    let mut executor = Command::new(codex_utils_cargo_bin::cargo_bin("onigio")?)
         .args(["exec-server", "--listen", "ws://127.0.0.1:0"])
         .stdout(Stdio::piped())
         .kill_on_drop(true)
@@ -840,7 +840,7 @@ async fn guardian_review_does_not_discover_executor_mcp() -> Result<()> {
         .write(codex_home.path())?;
     std::fs::write(executor_home.path().join("config.toml"), "")?;
     let codex_bin = toml::Value::String(
-        codex_utils_cargo_bin::cargo_bin("onigio-agent")?
+        codex_utils_cargo_bin::cargo_bin("onigio")?
             .to_string_lossy()
             .into_owned(),
     );
@@ -1080,7 +1080,7 @@ async fn selected_executor_plugin_exposes_its_mcps_only_to_that_thread() -> Resu
         &oauth_credentials_path,
         serde_json::to_vec(&json!({"host": host_oauth_credential.clone()}))?,
     )?;
-    let mut executor = Command::new(codex_utils_cargo_bin::cargo_bin("onigio-agent")?)
+    let mut executor = Command::new(codex_utils_cargo_bin::cargo_bin("onigio")?)
         .args(["exec-server", "--listen", "ws://127.0.0.1:0"])
         .stdout(Stdio::piped())
         .kill_on_drop(true)

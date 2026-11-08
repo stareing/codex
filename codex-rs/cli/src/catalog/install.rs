@@ -667,7 +667,7 @@ fn find_entry(ledger: &Ledger, selector: &str) -> Result<LedgerEntry, CatalogErr
         Lookup::Found(entry) => Ok(entry.clone()),
         Lookup::Missing => Err(local(
             "not_installed",
-            format!("`{selector}` is not installed on this computer; see `onigio-agent list`"),
+            format!("`{selector}` is not installed on this computer; see `onigio list`"),
         )),
         Lookup::Ambiguous(entries) => {
             let mut err = local(
@@ -747,7 +747,7 @@ pub(crate) async fn set_enabled(
             "withdrawn",
             format!(
                 "the site withdrew `{}` ({}); it stays off until the site offers it again \
-                 (`onigio-agent sync-installed`), or remove it",
+                 (`onigio sync-installed`), or remove it",
                 entry.name, withdrawal.reason
             ),
         ));

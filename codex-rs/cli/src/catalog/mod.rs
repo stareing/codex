@@ -394,7 +394,7 @@ async fn run_list(
         eprintln!("Showing this computer only: {}", warning.message());
     }
     if items.is_empty() {
-        eprintln!("Nothing installed from the site yet; try `onigio-agent search <words>`.");
+        eprintln!("Nothing installed from the site yet; try `onigio search <words>`.");
         return Ok(());
     }
     for item in &items {

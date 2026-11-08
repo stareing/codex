@@ -21,7 +21,7 @@ fn refusals_become_readable_messages() {
     // 401 always means "sign in again", whatever the body says.
     let err = CatalogError::from_response(401, &serde_json::json!({"code": "token_revoked"}));
     assert_eq!(err.code, "unauthorized");
-    assert!(err.message().contains("onigio-agent login"));
+    assert!(err.message().contains("onigio login"));
     // No body: the status decides.
     assert_eq!(
         CatalogError::from_response(404, &serde_json::Value::Null).code,

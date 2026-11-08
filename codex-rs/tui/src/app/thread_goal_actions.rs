@@ -17,7 +17,7 @@ use codex_protocol::ThreadId;
 
 const EPHEMERAL_THREAD_GOAL_ERROR_MESSAGE: &str = concat!(
     "Goals need a saved session. This session is temporary.\n",
-    "Run `onigio-agent` to start a saved session, or `onigio-agent resume` / `/resume` to reopen one.",
+    "Run `onigio` to start a saved session, or `onigio resume` / `/resume` to reopen one.",
 );
 
 impl App {

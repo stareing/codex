@@ -31,7 +31,7 @@ use crate::plugin_cmd::configured_marketplace_sources;
 use crate::plugin_cmd::load_cli_auth_manager;
 
 #[derive(Debug, Parser)]
-#[command(bin_name = "onigio-agent plugin marketplace")]
+#[command(bin_name = "onigio plugin marketplace")]
 pub struct MarketplaceCli {
     #[clap(flatten)]
     pub config_overrides: CliConfigOverrides,
@@ -59,8 +59,8 @@ enum MarketplaceSubcommand {
 
 #[derive(Debug, Parser)]
 #[command(
-    bin_name = "onigio-agent plugin marketplace add",
-    after_help = "Examples:\n  onigio-agent plugin marketplace add ./path/to/marketplace\n  onigio-agent plugin marketplace add owner/repo --ref main\n  onigio-agent plugin marketplace add https://github.com/owner/repo --sparse plugins/foo"
+    bin_name = "onigio plugin marketplace add",
+    after_help = "Examples:\n  onigio plugin marketplace add ./path/to/marketplace\n  onigio plugin marketplace add owner/repo --ref main\n  onigio plugin marketplace add https://github.com/owner/repo --sparse plugins/foo"
 )]
 struct AddMarketplaceArgs {
     /// Marketplace source: a local path, owner/repo[@ref], HTTPS Git URL, or SSH Git URL.
@@ -85,7 +85,7 @@ struct AddMarketplaceArgs {
 }
 
 #[derive(Debug, Parser)]
-#[command(bin_name = "onigio-agent plugin marketplace list")]
+#[command(bin_name = "onigio plugin marketplace list")]
 struct ListMarketplaceArgs {
     /// Output marketplace list as JSON.
     #[arg(long = "json")]
@@ -94,8 +94,8 @@ struct ListMarketplaceArgs {
 
 #[derive(Debug, Parser)]
 #[command(
-    bin_name = "onigio-agent plugin marketplace upgrade",
-    after_help = "Examples:\n  onigio-agent plugin marketplace upgrade\n  onigio-agent plugin marketplace upgrade debug"
+    bin_name = "onigio plugin marketplace upgrade",
+    after_help = "Examples:\n  onigio plugin marketplace upgrade\n  onigio plugin marketplace upgrade debug"
 )]
 struct UpgradeMarketplaceArgs {
     /// Optional configured marketplace name to upgrade. Omit to upgrade all Git marketplaces.
@@ -109,8 +109,8 @@ struct UpgradeMarketplaceArgs {
 
 #[derive(Debug, Parser)]
 #[command(
-    bin_name = "onigio-agent plugin marketplace remove",
-    after_help = "Example:\n  onigio-agent plugin marketplace remove debug"
+    bin_name = "onigio plugin marketplace remove",
+    after_help = "Example:\n  onigio plugin marketplace remove debug"
 )]
 struct RemoveMarketplaceArgs {
     /// Configured marketplace name to remove.

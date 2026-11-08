@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 build = "build.rs"
-default-run = "onigio-agent"
+default-run = "onigio"
 
 [[bin]]
-name = "onigio-agent"
+name = "onigio"
 path = "src/main.rs"
 
 [[bin]]
