@@ -7,6 +7,13 @@ use codex_history::CodexHarnessMetadata;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::turn_input::NotSubmittedReason;
+use codex_protocol::turn_input::TurnInput as SubmittedTurnInput;
+use codex_protocol::turn_input::TurnInputMode;
+use codex_protocol::turn_input::TurnInputRequest;
+use codex_protocol::turn_input::TurnInputSubmission;
+use codex_protocol::turn_input::TurnStartOptions;
+use std::sync::Arc;
 
 impl Session {
     /// Returns the input if there is no active turn to inject into.
@@ -164,6 +171,39 @@ impl Session {
             }));
         }
         (annotated_items, image_preparations)
+    }
+
+    /// Gives `item` to the running turn, or starts an automatic turn with it when the thread is idle.
+    /// When no turn may start (Plan mode, the server draining, other pending work), it is recorded
+    /// for the next turn instead.
+    pub(crate) async fn deliver_or_start_turn(self: &Arc<Self>, item: ResponseItem, trigger: &str) {
+        let Err(items) = self.inject_if_running(vec![item]).await else {
+            return;
+        };
+        let Some(item) = items.into_iter().next() else {
+            return;
+        };
+        let request = TurnInputRequest::new(SubmittedTurnInput::ResponseItem(item.clone()))
+            .on_start(TurnStartOptions {
+                turn_trigger: Some(trigger.to_string()),
+                ..Default::default()
+            });
+        let submission_id = uuid::Uuid::new_v4().to_string();
+        match super::turn_input::handle(self, request, TurnInputMode::StartIfIdle, submission_id)
+            .await
+        {
+            Ok(TurnInputSubmission::Started { .. }) => {}
+            Ok(TurnInputSubmission::NotSubmitted {
+                reason: NotSubmittedReason::NotIdle,
+            }) => {
+                // A turn started meanwhile.
+                self.inject_no_new_turn(vec![item], None).await;
+            }
+            outcome => {
+                tracing::debug!(?outcome, "no turn started for {trigger}; recording it");
+                self.inject_no_new_turn(vec![item], None).await;
+            }
+        }
     }
 
     /// Injects items into active work, or records them without starting a turn.

@@ -9,6 +9,7 @@ use tokio::time::Sleep;
 
 use super::SharedPluginMetricsSidecar;
 use super::UnifiedExecContext;
+use super::background_notice;
 use super::process::OutputBuffers;
 use super::process::OutputHandles;
 use super::process::UnifiedExecProcess;
@@ -159,6 +160,7 @@ pub(crate) fn spawn_exit_watcher(
     process: Arc<UnifiedExecProcess>,
     context: &UnifiedExecContext,
     command: Vec<String>,
+    shown_command: String,
     cwd: PathUri,
     process_id: i32,
     plugin_attribution: Option<PluginCommandAttribution>,
@@ -167,6 +169,12 @@ pub(crate) fn spawn_exit_watcher(
     network_denial_monitor: Option<tokio::task::JoinHandle<()>>,
     plugin_metrics_sidecar: Option<SharedPluginMetricsSidecar>,
 ) {
+    background_notice::spawn_stall_watcher(
+        Arc::downgrade(&context.session),
+        Arc::clone(&process),
+        process_id,
+        shown_command.clone(),
+    );
     let session_ref = Arc::clone(&context.session);
     let turn_ref = Arc::clone(&context.step_context.turn);
     let model_info = Arc::clone(&context.step_context.settings.model_info);
@@ -186,12 +194,20 @@ pub(crate) fn spawn_exit_watcher(
             let _ = network_denial_monitor.await;
         }
         let _interaction_guard = interaction_lock.lock_owned().await;
+        // Checked before the end event: once the model polls the session again it sees the exit itself.
+        let unwatched = session_ref
+            .services
+            .unified_exec_manager
+            .runs_unwatched(process_id, &process)
+            .await;
+        let notice_session = unwatched.then(|| Arc::clone(&session_ref));
 
         let duration = Instant::now().saturating_duration_since(started_at);
         let plugin_metrics_sidecar = plugin_metrics_sidecar
             .as_ref()
             .and_then(take_plugin_metrics_sidecar);
-        if let Some(message) = process.failure_message() {
+        let notice = if let Some(message) = process.failure_message() {
+            let notice = background_notice::failure_notice(process_id, &shown_command, &message);
             drop(plugin_metrics_sidecar);
             emit_failed_exec_end_for_unified_exec(
                 process.sandbox_type(),
@@ -209,8 +225,15 @@ pub(crate) fn spawn_exit_watcher(
                 duration,
             )
             .await;
+            notice
         } else {
             let exit_code = process.exit_code().unwrap_or(-1);
+            let tail = {
+                let buffers = output_buffer.lock().await;
+                background_notice::tail(&buffers.transcript.to_bytes())
+            };
+            let notice =
+                background_notice::exit_notice(process_id, &shown_command, exit_code, &tail);
             let timed_out = process.timed_out();
             finish_and_track_measurements(
                 plugin_metrics_sidecar,
@@ -238,6 +261,10 @@ pub(crate) fn spawn_exit_watcher(
                 timed_out,
             )
             .await;
+            notice
+        };
+        if let Some(session) = notice_session {
+            background_notice::deliver(&session, notice).await;
         }
     });
 }

@@ -1214,6 +1214,7 @@ impl UnifiedExecProcessManager {
     ) {
         let plugin_metrics_sidecar =
             metrics_sidecar.map(|sidecar| Arc::new(std::sync::Mutex::new(Some(sidecar))));
+        let shown_command = hook_command.clone();
         let entry = ProcessEntry {
             process: Arc::clone(&process),
             plugin_metrics_sidecar: plugin_metrics_sidecar.clone(),
@@ -1246,6 +1247,7 @@ impl UnifiedExecProcessManager {
             Arc::clone(&process),
             context,
             command.to_vec(),
+            shown_command,
             cwd,
             process_id,
             plugin_attribution,
@@ -1845,6 +1847,23 @@ impl UnifiedExecProcessManager {
                 cwd: entry.cwd.clone(),
             })
             .collect()
+    }
+
+    /// Whether the model has handed `process` to the background and not yet seen it end: it is still
+    /// stored, the call that started it has returned, and Codex did not stop it.
+    pub(super) async fn runs_unwatched(
+        &self,
+        process_id: i32,
+        process: &Arc<UnifiedExecProcess>,
+    ) -> bool {
+        if process.stop_requested() {
+            return false;
+        }
+        let store = self.process_store.lock().await;
+        store.processes.get(&process_id).is_some_and(|entry| {
+            Arc::ptr_eq(&entry.process, process)
+                && !entry.initial_exec_command_active.load(Ordering::Acquire)
+        })
     }
 
     pub(crate) async fn terminate_process(&self, process_id: i32) -> bool {

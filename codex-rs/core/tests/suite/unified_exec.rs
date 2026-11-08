@@ -1276,6 +1276,58 @@ async fn unified_exec_full_lifecycle_with_background_end_event() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_background_command_that_ends_after_the_turn_starts_a_turn_with_its_result() -> Result<()>
+{
+    skip_if_target_windows!(Ok(()), "uses a POSIX-only command fixture");
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let mut builder = test_codex();
+    let test = builder.build_with_auto_env(&server).await?;
+
+    let args = json!({
+        "cmd": "sleep 1; printf 'BG-DONE'; exit 3",
+        "yield_time_ms": 200,
+    });
+    let responses = vec![
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call("bg-call", "exec_command", &serde_json::to_string(&args)?),
+            ev_completed("resp-1"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-2"),
+            ev_assistant_message("msg-1", "it runs in the background"),
+            ev_completed("resp-2"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-3"),
+            ev_assistant_message("msg-2", "noted"),
+            ev_completed("resp-3"),
+        ]),
+    ];
+    let mock = mount_sse_sequence(&server, responses).await;
+
+    submit_unified_exec_turn(
+        &test,
+        "start it in the background",
+        PermissionProfile::Disabled,
+    )
+    .await?;
+    wait_for_event(&test.codex, |msg| matches!(msg, EventMsg::TurnComplete(_))).await;
+    // The command ends about a second later, with nothing watching it: a turn starts on its own.
+    wait_for_event(&test.codex, |msg| matches!(msg, EventMsg::TurnComplete(_))).await;
+
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 3, "an automatic turn after the exit");
+    let body = requests[2].body_json().to_string();
+    assert!(body.contains("has finished with exit code 3"), "{body}");
+    assert!(body.contains("BG-DONE"), "{body}");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unified_exec_network_denial_emits_failed_background_end_event() -> Result<()> {
     // TODO(anp): Remove after network-denial fixtures use target-native commands.
     skip_if_target_windows!(Ok(()), "uses the POSIX/Python network-denial fixture");
