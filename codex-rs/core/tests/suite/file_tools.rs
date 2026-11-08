@@ -2,10 +2,17 @@
 //! JSON call changes the file on disk through apply_patch's own path.
 
 use anyhow::Result;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::Op;
+use core_test_support::responses::ev_assistant_message;
+use core_test_support::responses::ev_completed;
 use core_test_support::responses::mount_function_call_agent_response;
+use core_test_support::responses::mount_sse_once;
+use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodexHarness;
 use core_test_support::test_codex::test_codex;
+use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
@@ -199,6 +206,59 @@ async fn reading_the_same_unchanged_lines_again_returns_a_note() -> Result<()> {
     harness.write_file("same.txt", "one\nTWO\n").await?;
     let changed = call(&harness, "read-c", "Read", args).await?;
     assert!(changed.contains("     2\tTWO"), "{changed}");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_compaction_puts_the_files_read_last_back_in_context() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let harness = harness().await?;
+    harness
+        .write_file("kept.txt", "KEEP-ME-LINE-1\nKEEP-ME-LINE-2\n")
+        .await?;
+    call(
+        &harness,
+        "read-k",
+        "Read",
+        json!({ "file_path": "kept.txt" }),
+    )
+    .await?;
+    // Changed on disk after the read: the restored copy is the current one.
+    harness
+        .write_file("kept.txt", "KEEP-ME-LINE-1\nCHANGED-LINE-2\n")
+        .await?;
+
+    mount_sse_once(
+        harness.server(),
+        sse(vec![
+            ev_assistant_message("m1", "SUMMARY"),
+            ev_completed("r1"),
+        ]),
+    )
+    .await;
+    let codex = &harness.test().codex;
+    codex.submit(Op::Compact).await?;
+    wait_for_event(codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+    // Editing the restored file needs no new Read.
+    call(
+        &harness,
+        "edit-k",
+        "Edit",
+        json!({ "file_path": "kept.txt", "old_string": "CHANGED", "new_string": "EDITED" }),
+    )
+    .await?;
+    assert_eq!(
+        harness.read_file_text("kept.txt").await?,
+        "KEEP-ME-LINE-1\nEDITED-LINE-2\n"
+    );
+    let bodies = harness.request_bodies().await;
+    let after = bodies
+        .last()
+        .expect("a request after the compaction")
+        .to_string();
+    assert!(after.contains("The conversation was just compacted"), "{after}");
+    assert!(after.contains("CHANGED-LINE-2"), "{after}");
     Ok(())
 }
 

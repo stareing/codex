@@ -45,7 +45,7 @@ pub const EDIT_TOOL_NAME: &str = "Edit";
 pub const WRITE_TOOL_NAME: &str = "Write";
 
 /// Lines `Read` returns when no `limit` is given.
-const DEFAULT_READ_LINES: usize = 2000;
+pub(crate) const DEFAULT_READ_LINES: usize = 2000;
 /// Longer lines are cut in `Read`'s output.
 const MAX_LINE_CHARS: usize = 2000;
 /// Files larger than this are refused by all three tools (read in parts with the shell instead).
@@ -645,7 +645,7 @@ impl ToolExecutor<ToolInvocation> for ReadFileHandler {
             };
             let offset = args.offset.unwrap_or(1).max(1);
             let limit = args.limit.filter(|l| *l > 0).unwrap_or(DEFAULT_READ_LINES);
-            if ledger(&invocation).read(target.key(), &text, offset, limit)
+            if ledger(&invocation).read(target.key(), target.path.clone(), &text, offset, limit)
                 == ReadOutcome::Unchanged
             {
                 return Ok(boxed_tool_output(FunctionToolOutput::from_text(
@@ -738,8 +738,9 @@ impl ToolExecutor<ToolInvocation> for EditFileHandler {
                 .map_err(|reason| refuse(format!("Edit `{}`: {reason}", target.shown)))?;
             let patch = whole_file_patch(&args.file_path, Some(&text), &next);
             let session = Arc::clone(&invocation.session);
+            let uri = target.path.clone();
             let output = apply_generated_patch(invocation, target, patch).await?;
-            lock_ledger(&session).wrote(key, &next);
+            lock_ledger(&session).wrote(key, uri, &next);
             Ok(output)
         })
     }
@@ -805,8 +806,9 @@ impl ToolExecutor<ToolInvocation> for WriteFileHandler {
                 .map_err(|stale| refuse(format!("Write: {}", stale.message(&target.shown))))?;
             let patch = whole_file_patch(&args.file_path, old.as_deref(), &args.content);
             let session = Arc::clone(&invocation.session);
+            let uri = target.path.clone();
             let output = apply_generated_patch(invocation, target, patch).await?;
-            lock_ledger(&session).wrote(key, &args.content);
+            lock_ledger(&session).wrote(key, uri, &args.content);
             Ok(output)
         })
     }

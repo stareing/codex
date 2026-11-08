@@ -371,6 +371,17 @@ async fn run_compact_task_inner_impl(
         // belongs to this compaction turn.
         summary_item.set_turn_id_if_missing(&turn_context.sub_id);
     }
+    // What was in use (latest files, unfinished plan, skills) follows the summary.
+    let restored = crate::compact_restore::restore(
+        sess.as_ref(),
+        history_items,
+        turn_context.model_context_window(),
+    )
+    .await;
+    if let Some(mut item) = restored.item {
+        item.set_turn_id_if_missing(&turn_context.sub_id);
+        new_history.push(item);
+    }
     let (window_number, window_ids) = sess.advance_auto_compact_window().await;
 
     let (initial_context, world_state_baseline) =
@@ -399,6 +410,16 @@ async fn run_compact_task_inner_impl(
         },
     )
     .await;
+    {
+        // The restored files are in the context again: Edit/Write may change them without a new Read.
+        let mut reads = sess
+            .file_reads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for file in restored.files {
+            reads.wrote(file.key, file.uri, &file.text);
+        }
+    }
     sess.recompute_token_usage(&turn_context).await;
     // A compaction that worked, manual or automatic, lets automatic compaction try again.
     sess.auto_compact_failures
