@@ -27,7 +27,6 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
-use crate::tools::handlers::apply_patch::apply_patch_file_update_mode;
 use crate::tools::handlers::apply_patch::execute_verified_patch;
 use crate::tools::handlers::file_access::Access;
 use crate::tools::handlers::file_access::ensure_access;
@@ -124,9 +123,12 @@ pub(crate) fn turn_environment(
             "{tool}: environment selection is unavailable for this turn"
         )));
     }
-    resolve_tool_environment(&invocation.step_context.environments, environment_id)?
+    resolve_tool_environment(&invocation.step_context.environments, environment_id)
         .cloned()
-        .ok_or_else(|| refuse(format!("{tool} is unavailable in this session")))
+        .map_err(|err| match err {
+            FunctionCallError::RespondToModel(message) => refuse(format!("{tool}: {message}")),
+            other => other,
+        })
 }
 
 /// One file the tools work on, resolved against the selected environment.
@@ -471,7 +473,7 @@ async fn apply_generated_patch(
 ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
     let ToolInvocation {
         session,
-        turn,
+        turn: _,
         step_context,
         cancellation_token,
         tracker,
@@ -485,12 +487,11 @@ async fn apply_generated_patch(
             target.shown
         ))
     })?;
-    let fs = target.environment.environment.get_filesystem();
+    let fs = target.environment.environment().get_filesystem();
     let sandbox = target.sandbox();
-    let action = match codex_apply_patch::verify_apply_patch_args_with_mode(
+    let action = match codex_apply_patch::verify_apply_patch_args(
         args,
         target.environment.cwd(),
-        apply_patch_file_update_mode(&turn),
         fs.as_ref(),
         Some(&sandbox),
     )
@@ -641,7 +642,7 @@ impl ToolExecutor<ToolInvocation> for ReadFileHandler {
                 target
                     .ensure(&invocation, READ_TOOL_NAME, &args.file_path, Access::Read)
                     .await?;
-                let fs = target.environment.environment.get_filesystem();
+                let fs = target.environment.environment().get_filesystem();
                 let Some(text) = target.read_text(fs.as_ref()).await? else {
                     return Err(refuse(format!("`{}` does not exist", target.shown)));
                 };
@@ -721,7 +722,7 @@ impl ToolExecutor<ToolInvocation> for EditFileHandler {
             target
                 .ensure(&invocation, EDIT_TOOL_NAME, &args.file_path, Access::Write)
                 .await?;
-            let fs = target.environment.environment.get_filesystem();
+            let fs = target.environment.environment().get_filesystem();
             let Some(text) = target.read_text(fs.as_ref()).await? else {
                 return Err(refuse(format!(
                     "`{}` does not exist; use Write to create it",
@@ -787,7 +788,7 @@ impl ToolExecutor<ToolInvocation> for WriteFileHandler {
             target
                 .ensure(&invocation, WRITE_TOOL_NAME, &args.file_path, Access::Write)
                 .await?;
-            let fs = target.environment.environment.get_filesystem();
+            let fs = target.environment.environment().get_filesystem();
             let old = target.read_text(fs.as_ref()).await?;
             if old.as_deref() == Some(args.content.as_str()) {
                 return Ok(boxed_tool_output(FunctionToolOutput::from_text(

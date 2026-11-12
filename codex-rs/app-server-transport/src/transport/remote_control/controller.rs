@@ -49,6 +49,7 @@ impl RemoteControl {
         }
         let (auth, authenticated) = RemoteControlAuth::capture_with_site_relay(
             self.auth_manager.clone(),
+            self.config.runtime_auth.clone(),
             self.site_relay.clone(),
         );
         let desired = match current.take() {

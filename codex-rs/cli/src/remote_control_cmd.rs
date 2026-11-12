@@ -50,8 +50,13 @@ pub(crate) struct RemoteControlCommand {
     #[arg(long = "sessions-file", value_name = "PATH")]
     sessions_file: Option<std::path::PathBuf>,
 
+    /// Run an embedded app-server in the foreground until Ctrl-C (always the case without a
+    /// subcommand in this build; `start` runs the daemon).
+    #[arg(long = "no-daemon")]
+    pub(super) no_daemon: bool,
+
     #[command(subcommand)]
-    subcommand: Option<RemoteControlSubcommand>,
+    pub(super) subcommand: Option<RemoteControlSubcommand>,
 }
 
 impl RemoteControlCommand {
@@ -85,7 +90,7 @@ impl RemoteControlCommand {
 }
 
 #[derive(Debug, Clone, Copy, clap::Subcommand)]
-enum RemoteControlSubcommand {
+pub(super) enum RemoteControlSubcommand {
     /// Start the app-server daemon with remote control enabled.
     Start,
 
@@ -101,6 +106,9 @@ pub(crate) async fn run(
     arg0_paths: Arg0DispatchPaths,
     root_config_overrides: CliConfigOverrides,
 ) -> anyhow::Result<()> {
+    if command.no_daemon && command.subcommand.is_some() {
+        anyhow::bail!("`--no-daemon` cannot be used with a remote-control subcommand");
+    }
     if matches!(
         command.subcommand,
         None | Some(RemoteControlSubcommand::Start)
@@ -131,21 +139,21 @@ pub(crate) async fn run(
         }
         _ => Vec::new(),
     };
+    // Without a subcommand this build always serves in the foreground: the folder allow-list and
+    // the desktop app's sessions file apply to that in-process server (`start` runs the daemon).
+    if command.subcommand.is_none() {
+        run_foreground_remote_control(
+            command.json,
+            arg0_paths,
+            root_config_overrides,
+            allowed_roots,
+            command.sessions_file,
+        )
+        .await?;
+        return Ok(());
+    }
+
     match command.subcommand {
-        None => {
-            print_remote_control_progress(
-                command.json,
-                "Starting app-server with remote control enabled...",
-            )?;
-            run_foreground_remote_control(
-                command.json,
-                arg0_paths,
-                root_config_overrides,
-                allowed_roots,
-                command.sessions_file,
-            )
-            .await?;
-        }
         Some(RemoteControlSubcommand::Start) => {
             print_remote_control_progress(
                 command.json,
@@ -169,6 +177,7 @@ pub(crate) async fn run(
             let output = codex_app_server_daemon::start_remote_control_pairing().await?;
             print_remote_control_pairing_output(&output, command.json)?;
         }
+        None => unreachable!("bare remote-control returned before explicit subcommand dispatch"),
     }
     Ok(())
 }
@@ -204,13 +213,21 @@ async fn run_foreground_remote_control(
     allowed_roots: Vec<std::path::PathBuf>,
     sessions_file: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
+    print_remote_control_progress(json, "Starting app-server with remote control enabled...")?;
+    #[cfg(not(windows))]
     let socket_dir = tempfile::Builder::new()
         .prefix("codex-rc-")
         .tempdir_in("/tmp")
         .or_else(|_| tempfile::tempdir())
         .context("failed to create private app-server socket directory")?;
-    // Not in the tempdir itself: on Windows it has an inherited ACL and the app-server refuses it.
-    let socket_path = codex_uds::socket_path_in_temp_dir(socket_dir.path(), "rc.sock");
+    #[cfg(not(windows))]
+    let socket_path = socket_dir.path().join("rc.sock");
+    // Let the transport create this parent with a protected DACL instead of
+    // inheriting the broader ACL from a directory created under `%TEMP%`.
+    #[cfg(windows)]
+    let socket_path = std::env::temp_dir()
+        .join("codex-remote-control")
+        .join(format!("rc-{}.sock", std::process::id()));
     let socket_path = AbsolutePathBuf::from_absolute_path(&socket_path)
         .context("private app-server socket path was not absolute")?;
     let transport = AppServerTransport::UnixSocket {

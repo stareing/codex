@@ -63,8 +63,10 @@ pub fn spawn_chat_stream(
         tool_index,
     ));
     ResponseStream {
+        routing_affinity: None,
         rx_event,
         upstream_request_id,
+        interrupt: None,
     }
 }
 
@@ -307,6 +309,7 @@ impl ChatStreamState {
             response_id: self.response_id.unwrap_or_default(),
             token_usage: self.token_usage,
             usage_metadata: None,
+            reasoning_removals: None,
             end_turn: None,
         }));
         results
@@ -320,6 +323,8 @@ impl ChatStreamState {
         });
         match target.kind {
             ChatToolKind::Function => ResponseItem::FunctionCall {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 name: target.name,
                 namespace: target.namespace,
@@ -329,6 +334,7 @@ impl ChatStreamState {
                 internal_chat_message_metadata_passthrough: None,
             },
             ChatToolKind::Freeform => ResponseItem::CustomToolCall {
+                encrypted_content: None,
                 id: None,
                 status: None,
                 call_id,
@@ -359,9 +365,15 @@ fn message_item(text: String) -> ResponseItem {
     let content = if text.is_empty() {
         Vec::new()
     } else {
-        vec![ContentItem::OutputText { text }]
+        vec![ContentItem::OutputText {
+            text,
+            annotations: None,
+            logprobs: None,
+        }]
     };
     ResponseItem::Message {
+        encrypted_content: None,
+        status: None,
         id: None,
         role: "assistant".to_string(),
         content,

@@ -34,6 +34,8 @@ async fn invocation(
         payload: ToolPayload::Function {
             arguments: arguments.to_string(),
         },
+        native_call: None,
+        environments: Default::default(),
     };
     (invocation, events)
 }

@@ -36,6 +36,7 @@ async fn start_with_site_relay(
             remote_control_url: relay_url,
             installation_id: TEST_INSTALLATION_ID.to_string(),
             policy: RemoteControlPolicy::Allowed,
+            runtime_auth: None,
             site_relay: Some(site_relay),
         },
         Some(remote_control_state_runtime(codex_home).await),

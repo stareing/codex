@@ -77,7 +77,10 @@ fn encode(line: &LogLine) -> Result<String, CheckpointError> {
 
 pub(crate) fn append(dir: &Path, line: &LogLine) -> Result<(), CheckpointError> {
     let text = encode(line)?;
-    let mut file = OpenOptions::new().create(true).append(true).open(dir.join(LOG_FILE))?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(LOG_FILE))?;
     file.write_all(format!("{text}\n").as_bytes())?;
     Ok(())
 }
@@ -124,13 +127,21 @@ pub(crate) fn replay(dir: &Path) -> Result<Replayed, CheckpointError> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Replayed::default()),
         Err(err) => return Err(err.into()),
     };
-    let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
     let mut replayed = Replayed::default();
     for (index, raw) in lines.iter().enumerate() {
         let line = match serde_json::from_str::<LogLine>(raw) {
             Ok(line) => line,
             Err(_) if index + 1 == lines.len() && !text.ends_with('\n') => break,
-            Err(err) => return Err(CheckpointError::Corrupt(format!("line {}: {err}", index + 1))),
+            Err(err) => {
+                return Err(CheckpointError::Corrupt(format!(
+                    "line {}: {err}",
+                    index + 1
+                )));
+            }
         };
         apply(&mut replayed, line);
     }
@@ -151,9 +162,18 @@ fn apply(replayed: &mut Replayed, line: LogLine) {
                 backups,
             });
         }
-        LogLine::Delta { turn_id, path, backup } => {
+        LogLine::Delta {
+            turn_id,
+            path,
+            backup,
+        } => {
             replayed.last_rewind = None;
-            if let Some(snapshot) = replayed.snapshots.iter_mut().rev().find(|s| s.turn_id == turn_id) {
+            if let Some(snapshot) = replayed
+                .snapshots
+                .iter_mut()
+                .rev()
+                .find(|s| s.turn_id == turn_id)
+            {
                 snapshot.backups.entry(path).or_insert(backup);
             }
         }

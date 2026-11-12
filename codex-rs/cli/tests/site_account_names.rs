@@ -37,6 +37,8 @@ fn launcher_variables_have_the_names_core_reads() {
             _ => None,
         }
     };
-    let relay = SiteRelay::from_lookup(lookup).unwrap().expect("all three variables recognised");
+    let relay = SiteRelay::from_lookup(lookup)
+        .unwrap()
+        .expect("all three variables recognised");
     assert_eq!(relay.url(), "https://onigio.com/agent-relay/");
 }

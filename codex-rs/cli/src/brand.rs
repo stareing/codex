@@ -2,7 +2,6 @@
 //! and `--version` still follow the name it was run as, so a copy run as `codex` keeps upstream's
 //! naming and home. `onigio-agent`, the name releases used before 11-08, is still recognised.
 
-use clap::ArgMatches;
 use clap::Command;
 
 /// The release name of the executable (`onigio.exe` on Windows).
@@ -80,11 +79,12 @@ pub fn invoked_as_branded() -> bool {
     branded_name(std::env::args_os().next().as_deref()).is_some()
 }
 
-/// Parses the process arguments with the branded name applied when it was run under it.
-pub fn get_matches(command: Command) -> ArgMatches {
-    match branded_name(std::env::args_os().next().as_deref()) {
-        Some(name) => rename_command(command, name).get_matches(),
-        None => command.get_matches(),
+/// The command with the branded name applied when `argv0` is the branded executable, so parse
+/// errors, help and usage name the program as it was run.
+pub fn command_for(command: Command, argv0: Option<&std::ffi::OsStr>) -> Command {
+    match branded_name(argv0) {
+        Some(name) => rename_command(command, name),
+        None => command,
     }
 }
 

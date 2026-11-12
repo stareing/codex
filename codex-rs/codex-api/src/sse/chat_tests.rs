@@ -54,6 +54,7 @@ fn completed(response_id: &str, token_usage: Option<TokenUsage>) -> ResponseEven
         response_id: response_id.to_string(),
         token_usage,
         usage_metadata: None,
+        reasoning_removals: None,
         end_turn: None,
     }
 }
@@ -177,6 +178,8 @@ async fn accumulates_parallel_tool_calls_and_usage_only_chunk() {
         ok(vec![
             created("chatcmpl-2"),
             ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 name: "shell".to_string(),
                 namespace: None,
@@ -186,6 +189,7 @@ async fn accumulates_parallel_tool_calls_and_usage_only_chunk() {
                 internal_chat_message_metadata_passthrough: None,
             }),
             ResponseEvent::OutputItemDone(ResponseItem::CustomToolCall {
+                encrypted_content: None,
                 id: None,
                 status: None,
                 call_id: "call_b".to_string(),
@@ -236,6 +240,8 @@ async fn maps_namespaced_tool_call_back_to_namespace() {
         ok(vec![
             created("chatcmpl-3"),
             ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 name: "search".to_string(),
                 namespace: Some("mcp__docs__".to_string()),

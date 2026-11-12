@@ -1,9 +1,11 @@
 use crate::function_tool::FunctionCallError;
+use crate::tools::context::ToolEnvironments;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::CoreToolRuntime;
+use crate::tools::registry::LiveEnvironmentResolver;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
@@ -21,14 +23,23 @@ use super::post_unified_exec_tool_use_payload;
 
 #[derive(Debug, Deserialize)]
 struct WriteStdinArgs {
-    // The model is trained on `session_id`.
-    session_id: i32,
     #[serde(default)]
     chars: String,
     #[serde(default = "super::default_write_stdin_yield_time_ms")]
     yield_time_ms: u64,
     #[serde(default)]
     max_output_tokens: Option<usize>,
+}
+
+impl WriteStdinArgs {
+    fn parse(payload: &ToolPayload) -> Result<Self, FunctionCallError> {
+        let ToolPayload::Function { arguments } = payload else {
+            return Err(FunctionCallError::RespondToModel(
+                "write_stdin handler received unsupported payload".to_string(),
+            ));
+        };
+        parse_arguments(arguments)
+    }
 }
 
 pub struct WriteStdinHandler;
@@ -66,24 +77,22 @@ impl WriteStdinHandler {
             cancellation_token,
             call_id,
             payload,
+            environments,
             ..
         } = invocation;
 
-        let arguments = match payload {
-            ToolPayload::Function { arguments } => arguments,
-            _ => {
-                return Err(FunctionCallError::RespondToModel(
-                    "write_stdin handler received unsupported payload".to_string(),
-                ));
-            }
+        let ToolEnvironments::Terminal(terminal) = environments else {
+            return Err(FunctionCallError::Fatal(
+                "write_stdin requires a terminal session".to_string(),
+            ));
         };
-
-        let args: WriteStdinArgs = parse_arguments(&arguments)?;
-        // The process runs where the primary environment is (write_stdin has no environment of its own).
+        let args = WriteStdinArgs::parse(&payload)?;
+        // The process runs in the environment its terminal session belongs to.
         let runs_here = step_context
             .environments
-            .primary()
-            .is_some_and(|environment| !environment.environment.is_remote());
+            .turn_environments()
+            .find(|environment| environment.selection.environment_id == terminal.environment_id)
+            .is_some_and(|environment| !environment.environment().is_remote());
         let context =
             UnifiedExecContext::new(session.clone(), step_context, cancellation_token, call_id);
         let mut response = session
@@ -92,7 +101,7 @@ impl WriteStdinHandler {
             .write_stdin(
                 &context,
                 WriteStdinRequest {
-                    process_id: args.session_id,
+                    terminal: &terminal,
                     input: &args.chars,
                     yield_time_ms: args.yield_time_ms,
                     max_output_tokens: args.max_output_tokens,
@@ -138,6 +147,10 @@ impl WriteStdinHandler {
 }
 
 impl CoreToolRuntime for WriteStdinHandler {
+    fn live_environment_resolver(&self) -> Option<LiveEnvironmentResolver> {
+        Some(super::terminal_session_for_input)
+    }
+
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         matches!(payload, ToolPayload::Function { .. })
     }

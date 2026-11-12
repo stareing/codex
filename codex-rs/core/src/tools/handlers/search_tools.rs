@@ -84,7 +84,7 @@ struct SearchScope {
 
 impl SearchScope {
     fn new(tool: &str, environment: &TurnEnvironment) -> Result<Self, FunctionCallError> {
-        if environment.environment.is_remote() {
+        if environment.environment().is_remote() {
             return Err(refuse(format!(
                 "{tool} searches files on this computer only; in a remote environment run `rg` with the shell"
             )));

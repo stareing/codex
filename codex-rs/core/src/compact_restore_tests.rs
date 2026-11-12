@@ -6,6 +6,8 @@ use pretty_assertions::assert_eq;
 
 fn plan_call(arguments: &str) -> ResponseItem {
     ResponseItem::FunctionCall {
+        encrypted_content: None,
+        status: None,
         id: None,
         name: PLAN_TOOL.to_string(),
         namespace: None,
@@ -18,6 +20,8 @@ fn plan_call(arguments: &str) -> ResponseItem {
 
 fn user(text: &str) -> ResponseItem {
     ResponseItem::Message {
+        encrypted_content: None,
+        status: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {

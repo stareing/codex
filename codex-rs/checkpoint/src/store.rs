@@ -52,13 +52,18 @@ pub(crate) fn backup_name(path: &Path, version: u32) -> String {
 
 fn path_hash(path: &Path) -> String {
     let digest = Sha256::digest(path.as_os_str().as_encoded_bytes());
-    digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect()
+    digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// A backup file's name (`<hash>@v<n>` or `<hash>@r<n>`), as opposed to the log and anything else in the folder.
 fn is_backup_file(name: &str) -> bool {
-    name.split_once('@')
-        .is_some_and(|(hash, rest)| hash.len() == 16 && (rest.starts_with('v') || rest.starts_with('r')))
+    name.split_once('@').is_some_and(|(hash, rest)| {
+        hash.len() == 16 && (rest.starts_with('v') || rest.starts_with('r'))
+    })
 }
 
 /// Limits a backup must fit in: the file's size and what the store may still hold.
@@ -78,15 +83,28 @@ pub(crate) fn create_backup(
 }
 
 /// The file's state just before rewind `seq` (`<hash>@r<seq>`, apart from the versions).
-pub(crate) fn create_pre_rewind(dir: &Path, path: &Path, seq: u64, budget: &Budget) -> io::Result<(Backup, u64)> {
+pub(crate) fn create_pre_rewind(
+    dir: &Path,
+    path: &Path,
+    seq: u64,
+    budget: &Budget,
+) -> io::Result<(Backup, u64)> {
     let name = format!("{}@r{seq}", path_hash(path));
     copy_as(dir, path, 0, name, budget)
 }
 
-fn copy_as(dir: &Path, path: &Path, version: u32, name: String, budget: &Budget) -> io::Result<(Backup, u64)> {
+fn copy_as(
+    dir: &Path,
+    path: &Path,
+    version: u32,
+    name: String,
+    budget: &Budget,
+) -> io::Result<(Backup, u64)> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok((Backup::absent(version), 0)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            return Ok((Backup::absent(version), 0));
+        }
         Err(err) => return Err(err),
     };
     let size = metadata.len();
@@ -161,7 +179,11 @@ fn same_bytes(a: &Path, b: &Path) -> io::Result<bool> {
 /// `path` lexically inside `root` (whole components; on Windows regardless of case).
 pub(crate) fn within(path: &Path, root: &Path) -> bool {
     let mut parts = path.components();
-    root.components().all(|part| parts.next().is_some_and(|other| same_component(part, other)))
+    root.components().all(|part| {
+        parts
+            .next()
+            .is_some_and(|other| same_component(part, other))
+    })
 }
 
 #[cfg(windows)]

@@ -1,6 +1,6 @@
 ---
 source: tui/src/app/turn_tips_tests.rs
-assertion_line: 337
+assertion_line: 387
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screens.join(\"\\n\\n\"))"
 ---
 working=true, response rows=1, 80x12
@@ -26,12 +26,12 @@ working=true, response rows=1, 80x6
   ? for shortcuts
 
 working=false, response rows=1, 80x12
-Show a response.
+› Show a response.
 
 • Done.
   └ Tip: Try /help.
 
-  [completion time]
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -39,13 +39,65 @@ Show a response.
   gpt-test default · /tmp/project
   ? for shortcuts
 
-working=false, response rows=30, 80x12
-Show a response.
+working=false, response rows=1, 80x24
+
+› Show a response.
+
+
+Response row 0
 
 • Done.
   └ Tip: Try /help.
 
-  [completion time]
+  Worked for [duration] • [completion time]
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  gpt-test default · /tmp/project
+  ? for shortcuts
+
+Completion tip selected, 80x24
+
+› Show a response.
+
+
+Response row 0
+
+• Done.
+  └ Tip: Try /help.
+
+  Worked for [duration] • [completion time]
+
+
+
+
+
+
+
+
+                                                               Copying 5 chars…
+
+› Ask Codex to do anything
+
+  gpt-test default · /tmp/project
+  ? for shortcuts
+
+working=false, response rows=30, 80x12
+› Show a response.
+
+• Done.
+  └ Tip: Try /help.
+
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -56,7 +108,7 @@ Show a response.
 working=false, response rows=1, 80x9
 • Done.
 
-  [completion time]
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -65,10 +117,10 @@ working=false, response rows=1, 80x9
   ? for shortcuts
 
 working=false, response rows=1, 80x10
-Show a response.
+› Show a response.
 • Done.
 
-  [completion time]
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -77,11 +129,11 @@ Show a response.
   ? for shortcuts
 
 working=false, response rows=1, 80x11
-Show a response.
+› Show a response.
 • Done.
   └ Tip: Try /help.
 
-  [completion time]
+  Worked for [duration] • [completion time]
 
 
 › Ask Codex to do anything
@@ -90,18 +142,18 @@ Show a response.
   ? for shortcuts
 
 working=false, response rows=1, 12x12
-Response row
-0
 
 • Done.
 
+  Worked
+  for <1s •
   [completion time]
 
 
 › Ask Codex
 
-  gpt-test …
-  ? for shor
+  gpt-test
+  default…
 
 working=false, response rows=1, 80x4
 

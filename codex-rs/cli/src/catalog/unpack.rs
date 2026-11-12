@@ -118,7 +118,10 @@ pub(crate) fn unpack_zip(bytes: &[u8], dest: &Path) -> Result<(), UnpackError> {
         let mut entry = archive
             .by_index(index)
             .map_err(|err| UnpackError::NotAZip(err.to_string()))?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|err| UnpackError::NotAZip(err.to_string()))?
+            .to_string();
         let relative = safe_relative_path(&name)?;
         if entry.enclosed_name().is_none() {
             return Err(UnpackError::UnsafePath(name));

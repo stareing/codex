@@ -56,7 +56,12 @@ fn changes(report: &RewindReport) -> Vec<(String, Change)> {
     report
         .files_changed
         .iter()
-        .map(|c| (c.path.file_name().unwrap().to_string_lossy().into_owned(), c.change))
+        .map(|c| {
+            (
+                c.path.file_name().unwrap().to_string_lossy().into_owned(),
+                c.change,
+            )
+        })
         .collect()
 }
 
@@ -64,7 +69,12 @@ fn skipped(report: &RewindReport) -> Vec<(String, SkipReason)> {
     report
         .skipped
         .iter()
-        .map(|s| (s.path.file_name().unwrap().to_string_lossy().into_owned(), s.reason))
+        .map(|s| {
+            (
+                s.path.file_name().unwrap().to_string_lossy().into_owned(),
+                s.reason,
+            )
+        })
         .collect()
 }
 
@@ -114,7 +124,10 @@ fn preview_counts_lines_and_changes_nothing() {
     let report = history.rewind("t1", true, TIMEOUT).unwrap();
     let change = &report.files_changed[0];
     // Back to the snapshot: "TWO" and "three" go, "two" comes back.
-    assert_eq!((change.change, change.insertions, change.deletions), (Change::Restore, 1, 2));
+    assert_eq!(
+        (change.change, change.insertions, change.deletions),
+        (Change::Restore, 1, 2)
+    );
     assert_eq!(fx.read("a.txt").as_deref(), Some("one\nTWO\nthree\n"));
     assert!(!history.list().unwrap().can_undo);
 }
@@ -292,9 +305,18 @@ fn old_snapshots_are_dropped_with_their_backups() {
         history.make_snapshot(&format!("t{turn}")).unwrap();
     }
 
-    let turns: Vec<String> = history.list().unwrap().checkpoints.into_iter().map(|c| c.turn_id).collect();
+    let turns: Vec<String> = history
+        .list()
+        .unwrap()
+        .checkpoints
+        .into_iter()
+        .map(|c| c.turn_id)
+        .collect();
     assert_eq!(turns, vec!["t3", "t4", "t5"]);
-    assert_eq!(history.rewind("t1", true, TIMEOUT), Err(CheckpointError::CheckpointNotFound));
+    assert_eq!(
+        history.rewind("t1", true, TIMEOUT),
+        Err(CheckpointError::CheckpointNotFound)
+    );
     let mut files: Vec<String> = fs::read_dir(&fx.store)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -303,7 +325,14 @@ fn old_snapshots_are_dropped_with_their_backups() {
     files.sort();
     let hash = store::backup_name(&fx.path("a.txt"), 0);
     let hash = hash.trim_end_matches("@v0");
-    assert_eq!(files, vec![format!("{hash}@v3"), format!("{hash}@v4"), format!("{hash}@v5")]);
+    assert_eq!(
+        files,
+        vec![
+            format!("{hash}@v3"),
+            format!("{hash}@v4"),
+            format!("{hash}@v5")
+        ]
+    );
 
     // The log was compacted to the kept snapshots.
     drop(history);
@@ -359,7 +388,11 @@ fn replay_ignores_a_cut_last_line_and_refuses_a_broken_one_before() {
 
     text.push_str("\n{\"type\":\"undo\",\"seq\":0}\n");
     fs::write(&log, &text).unwrap();
-    let opened = FileHistory::open(&fx.store, vec![fx.root.clone()], CheckpointConfig::default());
+    let opened = FileHistory::open(
+        &fx.store,
+        vec![fx.root.clone()],
+        CheckpointConfig::default(),
+    );
     assert!(matches!(opened, Err(CheckpointError::Corrupt(_))));
 }
 
@@ -368,7 +401,10 @@ fn undo_takes_the_rewind_back() {
     let fx = Fixture::new();
     fx.write("a.txt", "before\n");
     let history = fx.open();
-    assert_eq!(history.undo_rewind(false, TIMEOUT), Err(CheckpointError::NothingToUndo));
+    assert_eq!(
+        history.undo_rewind(false, TIMEOUT),
+        Err(CheckpointError::NothingToUndo)
+    );
     history.make_snapshot("t1").unwrap();
     history.track_edit(&fx.path("a.txt")).unwrap();
     fx.write("a.txt", "after\n");
@@ -380,11 +416,17 @@ fn undo_takes_the_rewind_back() {
     let report = history.undo_rewind(false, TIMEOUT).unwrap();
     assert_eq!(
         changes(&report),
-        vec![("a.txt".into(), Change::Restore), ("new.txt".into(), Change::Recreate)]
+        vec![
+            ("a.txt".into(), Change::Restore),
+            ("new.txt".into(), Change::Recreate)
+        ]
     );
     assert_eq!(fx.read("a.txt").as_deref(), Some("after\n"));
     assert_eq!(fx.read("new.txt").as_deref(), Some("new\n"));
-    assert_eq!(history.undo_rewind(false, TIMEOUT), Err(CheckpointError::NothingToUndo));
+    assert_eq!(
+        history.undo_rewind(false, TIMEOUT),
+        Err(CheckpointError::NothingToUndo)
+    );
 }
 
 #[test]
@@ -401,7 +443,10 @@ fn undo_survives_a_reopen_until_the_next_turn() {
     let history = fx.open();
     assert!(history.list().unwrap().can_undo);
     history.make_snapshot("t2").unwrap();
-    assert!(!history.list().unwrap().can_undo, "a new turn may have changed the files again");
+    assert!(
+        !history.list().unwrap().can_undo,
+        "a new turn may have changed the files again"
+    );
     drop(history);
     assert!(!fx.open().list().unwrap().can_undo);
 }
@@ -411,7 +456,10 @@ fn paths_outside_the_folders_are_refused() {
     let fx = Fixture::new();
     let history = fx.open();
     history.make_snapshot("t1").unwrap();
-    assert_eq!(history.track_edit(Path::new("relative.txt")), Err(CheckpointError::PathOutsideRoots));
+    assert_eq!(
+        history.track_edit(Path::new("relative.txt")),
+        Err(CheckpointError::PathOutsideRoots)
+    );
     assert_eq!(
         history.track_edit(&fx.root.join("..").join("escape.txt")),
         Err(CheckpointError::PathOutsideRoots)
@@ -423,7 +471,10 @@ fn paths_outside_the_folders_are_refused() {
     history.track_edit(&outside).unwrap();
     fs::write(&outside, "changed\n").unwrap();
     let report = history.rewind("t1", false, TIMEOUT).unwrap();
-    assert_eq!(skipped(&report), vec![("outside.txt".into(), SkipReason::OutsideRoots)]);
+    assert_eq!(
+        skipped(&report),
+        vec![("outside.txt".into(), SkipReason::OutsideRoots)]
+    );
     assert_eq!(fs::read_to_string(&outside).unwrap(), "changed\n");
 }
 
@@ -444,8 +495,14 @@ fn a_link_on_the_way_is_not_followed() {
     std::os::unix::fs::symlink(&elsewhere, fx.path("dir")).unwrap();
 
     let report = history.rewind("t1", false, TIMEOUT).unwrap();
-    assert_eq!(skipped(&report), vec![("a.txt".into(), SkipReason::Symlink)]);
-    assert_eq!(fs::read_to_string(elsewhere.join("a.txt")).unwrap(), "not ours\n");
+    assert_eq!(
+        skipped(&report),
+        vec![("a.txt".into(), SkipReason::Symlink)]
+    );
+    assert_eq!(
+        fs::read_to_string(elsewhere.join("a.txt")).unwrap(),
+        "not ours\n"
+    );
 }
 
 #[test]
@@ -455,8 +512,14 @@ fn a_running_restore_blocks_another() {
     history.make_snapshot("t1").unwrap();
     history.lock().restoring = Some(Instant::now());
     assert!(history.restore_in_progress());
-    assert_eq!(history.rewind("t1", true, TIMEOUT), Err(CheckpointError::RestoreInProgress));
-    assert_eq!(history.undo_rewind(true, TIMEOUT), Err(CheckpointError::RestoreInProgress));
+    assert_eq!(
+        history.rewind("t1", true, TIMEOUT),
+        Err(CheckpointError::RestoreInProgress)
+    );
+    assert_eq!(
+        history.undo_rewind(true, TIMEOUT),
+        Err(CheckpointError::RestoreInProgress)
+    );
 
     // A lock older than the limit was left behind: it no longer counts.
     if let Some(stale) = Instant::now().checked_sub(RESTORE_LOCK + Duration::from_secs(1)) {
@@ -465,7 +528,10 @@ fn a_running_restore_blocks_another() {
         assert!(history.rewind("t1", true, TIMEOUT).is_ok());
     }
     history.rewind("t1", true, TIMEOUT).unwrap();
-    assert!(!history.restore_in_progress(), "the lock is released after a rewind");
+    assert!(
+        !history.restore_in_progress(),
+        "the lock is released after a rewind"
+    );
 }
 
 #[test]
@@ -476,7 +542,10 @@ fn a_rewind_past_its_time_stops() {
     history.make_snapshot("t1").unwrap();
     history.track_edit(&fx.path("a.txt")).unwrap();
     fx.write("a.txt", "b\n");
-    assert_eq!(history.rewind("t1", false, Duration::ZERO), Err(CheckpointError::TimedOut));
+    assert_eq!(
+        history.rewind("t1", false, Duration::ZERO),
+        Err(CheckpointError::TimedOut)
+    );
     assert_eq!(fx.read("a.txt").as_deref(), Some("b\n"));
 }
 
@@ -484,7 +553,10 @@ fn a_rewind_past_its_time_stops() {
 fn track_edit_needs_a_snapshot() {
     let fx = Fixture::new();
     let history = fx.open();
-    assert_eq!(history.track_edit(&fx.path("a.txt")), Err(CheckpointError::NoSnapshot));
+    assert_eq!(
+        history.track_edit(&fx.path("a.txt")),
+        Err(CheckpointError::NoSnapshot)
+    );
 }
 
 #[test]
@@ -496,10 +568,19 @@ fn disabled_does_nothing() {
     });
     assert!(!history.enabled());
     assert_eq!(history.make_snapshot("t1"), Err(CheckpointError::Disabled));
-    assert_eq!(history.track_edit(&fx.path("a.txt")), Err(CheckpointError::Disabled));
+    assert_eq!(
+        history.track_edit(&fx.path("a.txt")),
+        Err(CheckpointError::Disabled)
+    );
     assert_eq!(history.list(), Err(CheckpointError::Disabled));
-    assert_eq!(history.rewind("t1", true, TIMEOUT), Err(CheckpointError::Disabled));
-    assert_eq!(history.undo_rewind(true, TIMEOUT), Err(CheckpointError::Disabled));
+    assert_eq!(
+        history.rewind("t1", true, TIMEOUT),
+        Err(CheckpointError::Disabled)
+    );
+    assert_eq!(
+        history.undo_rewind(true, TIMEOUT),
+        Err(CheckpointError::Disabled)
+    );
     assert!(!fx.store.exists());
 }
 
@@ -514,7 +595,12 @@ fn a_fork_starts_with_the_same_checkpoints() {
     let forked_dir = fx.store.parent().unwrap().join("thread-2");
     history.copy_to(&forked_dir).unwrap();
 
-    let forked = FileHistory::open(&forked_dir, vec![fx.root.clone()], CheckpointConfig::default()).unwrap();
+    let forked = FileHistory::open(
+        &forked_dir,
+        vec![fx.root.clone()],
+        CheckpointConfig::default(),
+    )
+    .unwrap();
     forked.rewind("t1", false, TIMEOUT).unwrap();
     assert_eq!(fx.read("a.txt").as_deref(), Some("a0\n"));
 }
@@ -528,7 +614,10 @@ fn codes_are_stable() {
         serde_json::to_value(SkipReason::BackupMissing).unwrap(),
         serde_json::json!("backup_missing")
     );
-    assert_eq!(serde_json::to_value(Change::Recreate).unwrap(), serde_json::json!("recreate"));
+    assert_eq!(
+        serde_json::to_value(Change::Recreate).unwrap(),
+        serde_json::json!("recreate")
+    );
 }
 
 #[test]
@@ -543,7 +632,10 @@ fn one_history_per_folder_in_a_process() {
     assert!(!restore_running(&fx.store));
     first.lock().restoring = Some(Instant::now());
     assert!(restore_running(&fx.store));
-    assert!(!restore_running(&fx.store.with_file_name("other")), "another thread");
+    assert!(
+        !restore_running(&fx.store.with_file_name("other")),
+        "another thread"
+    );
     first.lock().restoring = None;
 }
 
@@ -564,6 +656,10 @@ fn thread_folders_are_plain_names() {
         PathBuf::from("/home/a/.onigio/checkpoints/019a-ff_2")
     );
     for bad in ["", "..", "a/b", "a\\b", "x.y"] {
-        assert_eq!(thread_dir(home, bad), Err(CheckpointError::PathOutsideRoots), "{bad}");
+        assert_eq!(
+            thread_dir(home, bad),
+            Err(CheckpointError::PathOutsideRoots),
+            "{bad}"
+        );
     }
 }

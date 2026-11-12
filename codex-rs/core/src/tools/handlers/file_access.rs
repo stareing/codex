@@ -30,14 +30,13 @@ use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::ReadDenyMatcher;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::request_permissions::RequestPermissionProfile;
-use codex_protocol::request_permissions::RequestPermissionsArgs;
-use codex_sandboxing::policy_transforms::merge_permission_profiles;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 
 use crate::function_tool::FunctionCallError;
 use crate::session::turn_context::TurnEnvironment;
 use crate::tools::context::ToolInvocation;
+use crate::tools::handlers::PreparedPermissionRequest;
 use crate::tools::handlers::file_tools::refuse;
 
 /// Folders Claude Code never edits without asking (`DANGEROUS_DIRECTORIES`), with this agent's own config folders
@@ -382,21 +381,15 @@ pub(crate) async fn ensure_access(
     path: &Path,
     access: Access,
 ) -> Result<(), FunctionCallError> {
-    if environment.environment.is_remote() {
+    if environment.environment().is_remote() {
         return Ok(());
     }
     let environment_id = environment.selection.environment_id.as_str();
     let session = &invocation.session;
-    let granted = merge_permission_profiles(
-        session
-            .granted_session_permissions(environment_id)
-            .await
-            .as_ref(),
-        session
-            .granted_turn_permissions(environment_id)
-            .await
-            .as_ref(),
-    );
+    let granted = invocation
+        .step_context
+        .turn
+        .granted_permissions(environment_id);
     let cwd = environment.cwd().to_path_buf();
     let policy = environment
         .sandbox_context(granted.clone())
@@ -462,8 +455,8 @@ pub(crate) async fn ensure_access(
                 asked_for.display()
             ))
         })?;
-    let args = RequestPermissionsArgs {
-        environment_id: Some(environment_id.to_string()),
+    let request = PreparedPermissionRequest {
+        environment_id: environment_id.to_string(),
         reason: Some(question),
         permissions: RequestPermissionProfile {
             network: None,
@@ -483,8 +476,7 @@ pub(crate) async fn ensure_access(
         .request_permissions_for_environment(
             &invocation.step_context,
             invocation.call_id.clone(),
-            args,
-            environment.selection(),
+            request,
             invocation.cancellation_token.clone(),
         )
         .await

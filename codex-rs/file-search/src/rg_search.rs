@@ -445,7 +445,8 @@ pub fn grep(
                     output.files.push(path);
                 } else {
                     output.files_with_counts += 1;
-                    output.total_matches += sink.stats().map_or(0, grep_printer::Stats::matched_lines);
+                    output.total_matches +=
+                        sink.stats().map_or(0, grep_printer::Stats::matched_lines);
                 }
             }
         }

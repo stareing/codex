@@ -104,7 +104,10 @@ const RAW_DIFF_SUMMARY_WIDTH: usize = 10_000;
 mod activity_details;
 pub(crate) mod activity_preview;
 mod approvals;
+mod async_questions;
+mod async_replies;
 mod base;
+mod delegated_message;
 mod dynamic;
 mod exec;
 mod hook_cell;
@@ -123,8 +126,10 @@ mod startup_warnings;
 mod warnings;
 
 pub(crate) use activity_details::ActivityDetails;
+pub(crate) use activity_preview::ActivityDisclosure;
 pub(crate) use approvals::*;
 pub(crate) use base::*;
+pub(crate) use delegated_message::DelegatedMessageCell;
 pub(crate) use dynamic::DynamicToolCallCell;
 pub(crate) use exec::*;
 pub(crate) use hook_cell::HookCell;
@@ -212,11 +217,21 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         Vec::new()
     }
 
+    /// Original Markdown for semantic copy targets, independent of presentation.
+    fn copy_source(&self) -> Option<&str> {
+        None
+    }
+
     /// Returns the logical lines for the main chat viewport.
     fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
 
     /// Returns copy-friendly plain logical lines for raw scrollback mode.
     fn raw_lines(&self) -> Vec<Line<'static>>;
+
+    /// A local artifact the owned fullscreen viewport may preview. Text surfaces ignore it.
+    fn image_path(&self) -> Option<AbsolutePathBuf> {
+        None
+    }
 
     /// Raw live presentation may omit transcript-only diagnostics without losing their source.
     fn live_raw_lines(&self) -> Vec<Line<'static>> {
@@ -243,6 +258,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         }
     }
 
+    /// Output-free descriptions of individual tool invocations, in transcript order.
+    fn tool_call_labels(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Stable, namespaced member identities used to retain disclosure across grouping and replay.
     /// Empty identities indicate ordinary content without a local disclosure control.
     fn activity_ids(&self) -> Vec<String> {
@@ -254,10 +274,10 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         self.transcript_hyperlink_lines(width)
     }
 
-    /// Whether an activity offers details beyond its compact presentation.
+    /// Details an activity offers beyond its compact presentation, if any.
     /// Prefer source metadata so collapsed rendering does not materialize hidden content.
-    fn has_hidden_activity_details(&self, _width: u16) -> bool {
-        true
+    fn activity_disclosure(&self, _width: u16) -> Option<ActivityDisclosure> {
+        Some(ActivityDisclosure::Generic)
     }
 
     fn display_lines_for_mode(&self, width: u16, mode: HistoryRenderMode) -> Vec<Line<'static>> {

@@ -44,7 +44,7 @@ pub(crate) async fn save_if_truncated(
         format!("-{}", output.chunk_id)
     };
     let path = dir.join(format!("{name}{chunk}.txt"));
-    let bytes = output.raw_output.clone();
+    let bytes = output.raw_output.text.clone().into_bytes();
     let written = tokio::task::spawn_blocking({
         let path = path.clone();
         move || -> std::io::Result<()> {
@@ -59,7 +59,7 @@ pub(crate) async fn save_if_truncated(
         Ok(Ok(())) => {
             output.saved_output = Some(SavedOutput {
                 path: path.to_string_lossy().into_owned(),
-                bytes: output.raw_output.len(),
+                bytes: output.raw_output.text.len(),
             });
         }
         Ok(Err(err)) => tracing::warn!("could not save truncated command output: {err}"),
@@ -102,14 +102,14 @@ mod tests {
             event_call_id: "call-1".to_string(),
             chunk_id: "c1".to_string(),
             wall_time: std::time::Duration::ZERO,
-            raw_output: raw.as_bytes().to_vec(),
+            raw_output: raw.into(),
             truncation_policy: TruncationPolicy::Bytes(200),
             max_output_tokens: None,
             process_id: None,
             exit_code: Some(0),
             original_token_count: None,
-            output_omitted_bytes: None,
             hook_command: None,
+            tool_cwd: None,
         }
     }
 

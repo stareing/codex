@@ -115,8 +115,14 @@ async fn rewind_files_to_the_start_of_a_turn_and_undo_it() -> Result<()> {
         mcp.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
-    assert_eq!(std::fs::read_to_string(workspace.join("notes.txt"))?, "after\n");
-    assert_eq!(std::fs::read_to_string(workspace.join("added.txt"))?, "added\n");
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("notes.txt"))?,
+        "after\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("added.txt"))?,
+        "added\n"
+    );
 
     let listed: ThreadCheckpointListResponse = mcp
         .request(|request_id| ClientRequest::ThreadCheckpointList {
@@ -152,12 +158,18 @@ async fn rewind_files_to_the_start_of_a_turn_and_undo_it() -> Result<()> {
             ("notes.txt".to_string(), ThreadCheckpointChange::Restore),
         ]
     );
-    assert_eq!(std::fs::read_to_string(workspace.join("notes.txt"))?, "after\n");
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("notes.txt"))?,
+        "after\n"
+    );
 
     let rewound: ThreadCheckpointRewindResponse = mcp.request(rewind(false)).await?;
     assert_eq!(changes(&rewound), changes(&preview));
     assert!(rewound.skipped.is_empty(), "{rewound:?}");
-    assert_eq!(std::fs::read_to_string(workspace.join("notes.txt"))?, "before\n");
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("notes.txt"))?,
+        "before\n"
+    );
     assert!(!workspace.join("added.txt").exists());
     let restored: ThreadCheckpointRestoredNotification = timeout(
         DEFAULT_READ_TIMEOUT,
@@ -177,8 +189,14 @@ async fn rewind_files_to_the_start_of_a_turn_and_undo_it() -> Result<()> {
         })
         .await?;
     assert!(undone.can_rewind, "{undone:?}");
-    assert_eq!(std::fs::read_to_string(workspace.join("notes.txt"))?, "after\n");
-    assert_eq!(std::fs::read_to_string(workspace.join("added.txt"))?, "added\n");
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("notes.txt"))?,
+        "after\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("added.txt"))?,
+        "added\n"
+    );
 
     let again: ThreadCheckpointRewindResponse = mcp
         .request(|request_id| ClientRequest::ThreadCheckpointUndoRewind {

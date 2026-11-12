@@ -4,9 +4,9 @@ use crate::context_manager::ContextManager;
 use crate::session::tests::make_session_and_context;
 use codex_history::InitialHistory;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::TokenUsage;
+use codex_protocol_test_support::uuid_v7_item_id_generator_for_test;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use test_case::test_case;
@@ -35,7 +35,12 @@ async fn guardian_checkpoint_preserves_live_context_without_storage(
     let world_state = WorldStateSnapshot::from(baseline.as_object().unwrap());
     {
         let mut state = session.state.lock().await;
-        state.history = ContextManager::for_session(&SessionSource::default());
+        state.history = ContextManager::for_session(
+            /*root_capabilities_restricted*/ false,
+            &crate::config::ManagedFeatures::from(codex_features::Features::with_defaults()),
+            codex_guardian_context::ContextBudgeting::Fixed,
+            uuid_v7_item_id_generator_for_test(),
+        );
         state
             .history
             .record_items([&instruction], turn.model_info().truncation_policy.into());
@@ -51,7 +56,7 @@ async fn guardian_checkpoint_preserves_live_context_without_storage(
             state.history.restore_review_context(
                 Some(&retained),
                 Some(&codex_history::GuardianHistoryCheckpoint(vec![
-                    instruction.clone(),
+                    instruction.clone().into(),
                 ])),
                 /*reviewer_compaction_hash*/ None,
             );
@@ -75,6 +80,8 @@ async fn guardian_checkpoint_preserves_live_context_without_storage(
                 ..Default::default()
             },
             Some(32_000),
+            /*includes_reasoning*/ true,
+            /*input_item_count*/ 0,
         );
     }
     let expected = session.clone_history().await;
@@ -84,7 +91,8 @@ async fn guardian_checkpoint_preserves_live_context_without_storage(
                 .guardian_history_checkpoint()
                 .unwrap()
                 .0
-                .contains(&instruction)
+                .iter()
+                .any(|entry| entry.item == instruction)
         );
     }
     let items = session.guardian_fork_history().await;
@@ -100,7 +108,12 @@ async fn guardian_checkpoint_preserves_live_context_without_storage(
     // Replay into a fresh session so preserved live state cannot mask missing checkpoint data.
     let (fork, _) = make_session_and_context().await;
     fork.state.lock().await.session_configuration.history_mode = history_mode;
-    fork.state.lock().await.history = ContextManager::for_session(&SessionSource::default());
+    fork.state.lock().await.history = ContextManager::for_session(
+        /*root_capabilities_restricted*/ false,
+        &crate::config::ManagedFeatures::from(codex_features::Features::with_defaults()),
+        codex_guardian_context::ContextBudgeting::Fixed,
+        uuid_v7_item_id_generator_for_test(),
+    );
     fork.record_initial_history(InitialHistory::Forked(items))
         .await;
     let restored = fork.clone_history().await;

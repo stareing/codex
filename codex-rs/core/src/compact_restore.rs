@@ -130,7 +130,7 @@ async fn read_recent_files(sess: &Session, budget: usize) -> Vec<(RestoredFile, 
         else {
             continue;
         };
-        let fs = environment.environment.get_filesystem();
+        let fs = environment.environment().get_filesystem();
         let sandbox = environment.sandbox_context(/*additional_permissions*/ None);
         let Ok(metadata) = fs
             .get_metadata(

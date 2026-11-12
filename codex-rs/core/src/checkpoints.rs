@@ -88,7 +88,7 @@ pub(crate) async fn track_patch(
     environment: &TurnEnvironment,
     file_paths: &[PathUri],
 ) {
-    if environment.environment.is_remote() || file_paths.is_empty() {
+    if environment.environment().is_remote() || file_paths.is_empty() {
         return;
     }
     let paths: Vec<PathBuf> = file_paths

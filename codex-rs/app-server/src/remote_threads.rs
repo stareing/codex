@@ -181,6 +181,9 @@ pub(crate) fn filter_response(
             response
                 .data
                 .retain(|thread| shared.threads.contains(&thread.id));
+            if let Some(read_states) = &mut response.read_states {
+                read_states.retain(|thread_id, _| shared.threads.contains(thread_id));
+            }
             ClientResponsePayload::ThreadList(response)
         }
         other => other,

@@ -20,7 +20,7 @@ pub(super) async fn fork_source(
     let state_db = codex_core::init_state_db(config).await;
     let environment_manager = EnvironmentManager::from_codex_home(
         config.codex_home.clone(),
-        Some(ExecServerRuntimePaths::from_optional_paths(
+        Some(ExecServerRuntimeOptions::from_optional_paths(
             arg0_paths.codex_self_exe.clone(),
             arg0_paths.codex_linux_sandbox_exe.clone(),
         )?),
@@ -28,6 +28,7 @@ pub(super) async fn fork_source(
     )
     .await?;
     let client = InProcessAppServerClient::start(InProcessClientStartArgs {
+        required_human_approval: false,
         arg0_paths: arg0_paths.clone(),
         config: std::sync::Arc::new(config.clone()),
         cli_overrides: cli_overrides.to_vec(),

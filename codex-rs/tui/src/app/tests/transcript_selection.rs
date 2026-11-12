@@ -18,7 +18,7 @@ async fn text_selection_temporarily_replaces_the_rendered_backtrack_highlight() 
         text_elements: Vec::new(),
         local_image_paths: Vec::new(),
         remote_image_urls: Vec::new(),
-        spoken: false,
+        presentation: Default::default(),
     })];
     app.open_transcript_overlay(&mut tui);
     while events.try_recv().is_ok() {}
@@ -72,8 +72,8 @@ async fn text_selection_temporarily_replaces_the_rendered_backtrack_highlight() 
         .await?;
     }
     let (_, highlighted) = render(&mut app);
-    // The selected leading newline paints one blank cell before the first prompt character.
-    assert_eq!(highlighted, " S");
+    // The selected leading newline does not paint an empty cell.
+    assert_eq!(highlighted, "S");
 
     app.handle_tui_event(
         &mut tui,

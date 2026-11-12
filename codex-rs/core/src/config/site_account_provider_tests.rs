@@ -291,7 +291,10 @@ async fn site_provider_uses_its_own_catalog_seeded_with_the_suggested_model() {
     // Providers without one, or an explicit model_catalog_json, keep upstream behaviour.
     let mut upstream = config.model_provider.clone();
     upstream.model_catalog_url = None;
-    assert_eq!(own_catalog_fallback("openai", &upstream, Some("x"), None), None);
+    assert_eq!(
+        own_catalog_fallback("openai", &upstream, Some("x"), None),
+        None
+    );
     let configured = ModelsResponse { models: Vec::new() };
     assert_eq!(
         own_catalog_fallback(

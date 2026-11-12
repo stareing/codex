@@ -44,8 +44,8 @@ pub(super) enum TipSurface {
     Completion,
 }
 
-fn is_final_answer(item: &ThreadItem) -> bool {
-    matches!(item, ThreadItem::AgentMessage { text, phase: Some(MessagePhase::FinalAnswer) | None, .. }
+fn is_final_answer(item: &ThreadItemPayload) -> bool {
+    matches!(item, ThreadItemPayload::AgentMessage { text, phase: Some(MessagePhase::FinalAnswer) | None, .. }
         if !text.trim().is_empty())
 }
 
@@ -84,14 +84,18 @@ impl TurnTips {
                 if item.thread_id == current.thread_id.to_string()
                     && item.turn_id == current.turn_id =>
             {
-                current.has_final_answer |= is_final_answer(&item.item);
+                current.has_final_answer |= is_final_answer(&item.item.payload);
             }
             ServerNotification::TurnCompleted(completed)
                 if completed.thread_id == current.thread_id.to_string()
                     && completed.turn.id == current.turn_id
                     && matches!(current.phase, Phase::Working) =>
             {
-                current.has_final_answer |= completed.turn.items.iter().any(is_final_answer);
+                current.has_final_answer |= completed
+                    .turn
+                    .items
+                    .iter()
+                    .any(|entry| is_final_answer(&entry.payload));
                 if completed.turn.status == TurnStatus::Completed
                     && current.has_final_answer
                     && !current.shown
@@ -154,15 +158,23 @@ impl App {
             || !self.chat_widget.composer_is_empty()
             || self.chat_widget.is_external_writer_view()
             || self.chat_widget.has_queued_follow_up_messages()
-            || !self.transcript_view.is_following()
-            || self.transcript_view.has_active_interaction()
             || self.backtrack.primed
             || self.backtrack.overlay_preview_active
-            || self.composer_hint(width).is_some()
+            || self
+                .chat_widget
+                .usage_notice(width.saturating_sub(/*rhs*/ 2))
+                .is_some()
         {
             return None;
         }
         let current = self.turn_tips.current.as_mut()?;
+        // Once painted, keep the working row stable while interacting with the transcript.
+        // Initial exposure and completion tips still wait for an idle, following viewport.
+        if (!self.transcript_view.is_following() || self.transcript_view.has_active_interaction())
+            && !(current.shown && matches!(current.phase, Phase::Working))
+        {
+            return None;
+        }
         if self.chat_widget.thread_id() != Some(current.thread_id) {
             return None;
         }

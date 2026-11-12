@@ -8,10 +8,17 @@ use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
 fn request(input: Vec<ResponseItem>, tools: Option<Value>) -> ResponsesApiRequest {
+    // Base instructions lead `input` as a developer message, as the client sends them.
+    let mut items = vec![message(
+        "developer",
+        vec![ContentItem::InputText {
+            text: "You are a coding agent.".to_string(),
+        }],
+    )];
+    items.extend(input);
     ResponsesApiRequest {
         model: "meta/llama-3.3-70b-instruct".to_string(),
-        instructions: "You are a coding agent.".to_string(),
-        input,
+        input: items,
         tools: tools.map(|tools| {
             let raw = serde_json::value::to_raw_value(&tools).expect("tools should serialize");
             ResponsesApiTools::from(Arc::from(raw))
@@ -29,6 +36,7 @@ fn request(input: Vec<ResponseItem>, tools: Option<Value>) -> ResponsesApiReques
         include: vec!["reasoning.encrypted_content".to_string()],
         service_tier: Some("priority".to_string()),
         prompt_cache_key: Some("cache-key".to_string()),
+        prompt_cache_options: None,
         text: None,
         client_metadata: None,
         access_programs: None,
@@ -37,6 +45,8 @@ fn request(input: Vec<ResponseItem>, tools: Option<Value>) -> ResponsesApiReques
 
 fn message(role: &str, content: Vec<ContentItem>) -> ResponseItem {
     ResponseItem::Message {
+        encrypted_content: None,
+        status: None,
         id: None,
         role: role.to_string(),
         content,
@@ -52,6 +62,8 @@ fn function_call(
     arguments: &str,
 ) -> ResponseItem {
     ResponseItem::FunctionCall {
+        encrypted_content: None,
+        status: None,
         id: None,
         name: name.to_string(),
         namespace: namespace.map(str::to_string),
@@ -107,6 +119,8 @@ fn converts_conversation_with_tool_calls_and_images() {
             "assistant",
             vec![ContentItem::OutputText {
                 text: "Let me look.".to_string(),
+                annotations: None,
+                logprobs: None,
             }],
         ),
         function_call("call_1", "shell", None, r#"{"command":["ls"]}"#),
@@ -133,6 +147,8 @@ fn converts_conversation_with_tool_calls_and_images() {
             "assistant",
             vec![ContentItem::OutputText {
                 text: "Done.".to_string(),
+                annotations: None,
+                logprobs: None,
             }],
         ),
     ];
@@ -233,6 +249,7 @@ fn converts_freeform_tools_and_custom_tool_history() {
             }],
         ),
         ResponseItem::CustomToolCall {
+            encrypted_content: None,
             id: None,
             status: None,
             call_id: "call_patch".to_string(),

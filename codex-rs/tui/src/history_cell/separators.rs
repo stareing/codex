@@ -6,12 +6,14 @@ use chrono::DateTime;
 use chrono::Datelike;
 use chrono::Local;
 use chrono::NaiveDate;
+use codex_app_server_protocol::Turn;
+use std::collections::HashMap;
 
 /// Completion metadata shown after the assistant's final response.
 ///
 /// The timestamp records when the turn actually finished, including when restored from history.
 /// Times use the host's clock preference; other local days include the date and other years the year.
-/// Durations are shown only above sixty seconds; shorter turns still show their timestamp.
+/// Known durations are always shown; sub-second durations display as less than one second.
 /// Absent metadata occupies no transcript rows.
 /// The display date is fixed at construction so crossing midnight cannot invalidate cached heights;
 /// restoring the conversation constructs new cells and refreshes whether the timestamp needs a date.
@@ -24,6 +26,38 @@ pub struct FinalMessageSeparator {
     clock_format: ClockFormat,
 }
 impl FinalMessageSeparator {
+    /// Full-screen transcripts also use untimed separators to identify completed turns.
+    pub(crate) fn from_turn_once(
+        turn: &Turn,
+        rendered_completion_turn_ids: &mut HashMap<String, bool>,
+        fallback_elapsed: Option<std::time::Duration>,
+        fallback_completed_at: Option<DateTime<Local>>,
+    ) -> Option<Self> {
+        let elapsed_seconds = turn
+            .duration_ms
+            .and_then(|duration| u64::try_from(duration).ok())
+            .map(|duration| duration / 1_000)
+            .or_else(|| fallback_elapsed.map(|elapsed| elapsed.as_secs()));
+        let completed_at = turn
+            .completed_at
+            .and_then(|timestamp| DateTime::from_timestamp(timestamp, /*nsecs*/ 0))
+            .map(|timestamp| timestamp.with_timezone(&Local))
+            .or(fallback_completed_at);
+        let has_label = completed_at.is_some() || elapsed_seconds.is_some();
+        if rendered_completion_turn_ids
+            .get(&turn.id)
+            .is_some_and(|labeled| *labeled || !has_label)
+        {
+            return None;
+        }
+        rendered_completion_turn_ids.insert(turn.id.clone(), has_label);
+        let cell = Self::new(elapsed_seconds, /*runtime_metrics*/ None);
+        Some(match completed_at {
+            Some(completed_at) => cell.with_completed_at(completed_at, ClockFormat::system()),
+            None => cell,
+        })
+    }
+
     /// Creates completion metadata using the protocol turn duration when available.
     pub(crate) fn new(
         elapsed_seconds: Option<u64>,
@@ -56,9 +90,17 @@ impl FinalMessageSeparator {
         self
     }
 
+    pub(crate) fn has_timing(&self) -> bool {
+        self.completed_at.is_some() || self.elapsed_seconds.is_some()
+    }
+
+    pub(crate) fn display_label(&self) -> Option<String> {
+        self.label(self.display_date)
+    }
+
     fn label(&self, today: NaiveDate) -> Option<String> {
         let mut label_parts = Vec::new();
-        if let Some(elapsed_seconds) = self.elapsed_seconds.filter(|seconds| *seconds > 60) {
+        if let Some(elapsed_seconds) = self.elapsed_seconds {
             let hours = elapsed_seconds / 3_600;
             let minutes = (elapsed_seconds % 3_600) / 60;
             let seconds = elapsed_seconds % 60;
@@ -66,6 +108,8 @@ impl FinalMessageSeparator {
                 format!("{hours}h {minutes}m {seconds}s")
             } else if minutes > 0 {
                 format!("{minutes}m {seconds}s")
+            } else if seconds == 0 {
+                "<1s".to_string()
             } else {
                 format!("{seconds}s")
             };
@@ -88,7 +132,7 @@ impl FinalMessageSeparator {
         if let Some(metrics_label) = self.runtime_metrics.and_then(runtime_metrics_label) {
             label_parts.push(metrics_label);
         }
-        (!label_parts.is_empty()).then(|| label_parts.join(" · "))
+        (!label_parts.is_empty()).then(|| label_parts.join(" • "))
     }
 }
 impl HistoryCell for FinalMessageSeparator {
@@ -96,7 +140,7 @@ impl HistoryCell for FinalMessageSeparator {
         if width == 0 {
             return Vec::new();
         }
-        self.label(self.display_date)
+        self.display_label()
             .map(|label| {
                 let indent = if width > 2 { "  " } else { "" };
                 let options = textwrap::Options::new(usize::from(width))
@@ -111,7 +155,7 @@ impl HistoryCell for FinalMessageSeparator {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.label(self.display_date)
+        self.display_label()
             .map(|label| vec![Line::from(label)])
             .unwrap_or_default()
     }

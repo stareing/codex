@@ -32,11 +32,12 @@ use wiremock::matchers::path;
 struct BearerAuth;
 
 impl AuthProvider for BearerAuth {
-    fn add_auth_headers(&self, headers: &mut HeaderMap) {
+    fn add_auth_headers(&self, headers: &mut HeaderMap) -> Result<(), codex_api::AuthError> {
         headers.insert(
             http::header::AUTHORIZATION,
             http::HeaderValue::from_static("Bearer test-key"),
         );
+        Ok(())
     }
 }
 
@@ -73,16 +74,31 @@ fn client(server: &MockServer) -> ChatCompletionsClient<ReqwestTransport> {
 fn request() -> ResponsesApiRequest {
     ResponsesApiRequest {
         model: "meta/llama-3.3-70b-instruct".to_string(),
-        instructions: "Be brief.".to_string(),
-        input: vec![ResponseItem::Message {
-            id: None,
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText {
-                text: "hi".to_string(),
-            }],
-            phase: None,
-            internal_chat_message_metadata_passthrough: None,
-        }],
+        input: vec![
+            // Base instructions lead `input` as a developer message, as the client sends them.
+            ResponseItem::Message {
+                encrypted_content: None,
+                status: None,
+                id: None,
+                role: "developer".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "Be brief.".to_string(),
+                }],
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            },
+            ResponseItem::Message {
+                encrypted_content: None,
+                status: None,
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "hi".to_string(),
+                }],
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            },
+        ],
         tools: None,
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -93,6 +109,7 @@ fn request() -> ResponsesApiRequest {
         include: Vec::new(),
         service_tier: None,
         prompt_cache_key: Some("cache".to_string()),
+        prompt_cache_options: None,
         text: None,
         client_metadata: None,
         access_programs: None,
@@ -147,10 +164,14 @@ async fn chat_client_posts_chat_body_and_streams_events() {
         })
     );
     let expected_message = ResponseItem::Message {
+        encrypted_content: None,
+        status: None,
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
             text: "Hello".to_string(),
+            annotations: None,
+            logprobs: None,
         }],
         phase: None,
         internal_chat_message_metadata_passthrough: None,

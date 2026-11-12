@@ -144,7 +144,9 @@ pub struct RewindReport {
 /// `<codex_home>/checkpoints/<thread_id>`; a thread id with anything but letters, digits, `-` and `_` is refused.
 pub fn thread_dir(codex_home: &Path, thread_id: &str) -> Result<PathBuf, CheckpointError> {
     let plain = !thread_id.is_empty()
-        && thread_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        && thread_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if !plain {
         return Err(CheckpointError::PathOutsideRoots);
     }
@@ -215,7 +217,10 @@ impl FileHistory {
             state.snapshots = replayed.snapshots;
             state.rewinds = replayed.rewinds;
             state.last_rewind = replayed.last_rewind;
-            let keep_from = state.snapshots.len().saturating_sub(config.max_snapshots.max(1));
+            let keep_from = state
+                .snapshots
+                .len()
+                .saturating_sub(config.max_snapshots.max(1));
             state.snapshots.drain(..keep_from);
             state.tracked = state
                 .snapshots
@@ -240,20 +245,28 @@ impl FileHistory {
 
     /// The folders a rewind may write in (the thread's work folders, which can change between turns).
     pub fn set_roots(&self, roots: Vec<PathBuf>) {
-        *self.roots.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = roots;
+        *self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = roots;
     }
 
     /// Sets the folders unless some are set already (the turn loop sets the turn's own; this is the fallback
     /// from the thread's configuration for a history no turn of this process has used yet).
     pub fn set_roots_if_unset(&self, roots: Vec<PathBuf>) {
-        let mut current = self.roots.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut current = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if current.is_empty() {
             *current = roots;
         }
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn require_enabled(&self) -> Result<(), CheckpointError> {
@@ -266,7 +279,11 @@ impl FileHistory {
 
     #[cfg(test)]
     fn phase(&self, name: &'static str, path: &Path) {
-        let hook = self.hook.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let hook = self
+            .hook
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if let Some(hook) = hook {
             hook(name, path);
         }
@@ -278,7 +295,10 @@ impl FileHistory {
     fn budget(&self) -> Budget {
         Budget {
             max_file_bytes: self.config.max_file_bytes,
-            remaining_bytes: self.config.max_total_bytes.saturating_sub(store::stored_bytes(&self.dir)),
+            remaining_bytes: self
+                .config
+                .max_total_bytes
+                .saturating_sub(store::stored_bytes(&self.dir)),
         }
     }
 
@@ -291,7 +311,11 @@ impl FileHistory {
         let (tracked, previous) = {
             let mut state = self.lock();
             state.last_rewind = None;
-            let previous = state.snapshots.last().map(|s| s.backups.clone()).unwrap_or_default();
+            let previous = state
+                .snapshots
+                .last()
+                .map(|s| s.backups.clone())
+                .unwrap_or_default();
             (state.tracked.clone(), previous)
         };
         let mut budget = self.budget();
@@ -315,7 +339,9 @@ impl FileHistory {
             // Files `track_edit` added while the backups above were taken.
             if let Some(latest) = state.snapshots.last() {
                 for (path, backup) in &latest.backups {
-                    backups.entry(path.clone()).or_insert_with(|| backup.clone());
+                    backups
+                        .entry(path.clone())
+                        .or_insert_with(|| backup.clone());
                 }
             }
             let snapshot = Snapshot {
@@ -325,7 +351,10 @@ impl FileHistory {
             };
             log::append(&self.dir, &LogLine::snapshot(&snapshot))?;
             state.snapshots.push(snapshot);
-            let excess = state.snapshots.len().saturating_sub(self.config.max_snapshots.max(1));
+            let excess = state
+                .snapshots
+                .len()
+                .saturating_sub(self.config.max_snapshots.max(1));
             let evicted = excess > 0;
             if evicted {
                 state.snapshots.drain(..excess);
@@ -413,7 +442,10 @@ impl FileHistory {
 
     fn begin_restore(&self) -> Result<RestoreGuard<'_>, CheckpointError> {
         let mut state = self.lock();
-        if state.restoring.is_some_and(|started| started.elapsed() < RESTORE_LOCK) {
+        if state
+            .restoring
+            .is_some_and(|started| started.elapsed() < RESTORE_LOCK)
+        {
             return Err(CheckpointError::RestoreInProgress);
         }
         state.restoring = Some(Instant::now());
@@ -477,11 +509,19 @@ impl FileHistory {
     }
 
     /// Takes the last rewind back (the files it changed get the content they had just before it).
-    pub fn undo_rewind(&self, dry_run: bool, timeout: Duration) -> Result<RewindReport, CheckpointError> {
+    pub fn undo_rewind(
+        &self,
+        dry_run: bool,
+        timeout: Duration,
+    ) -> Result<RewindReport, CheckpointError> {
         self.require_enabled()?;
         let _guard = self.begin_restore()?;
         let deadline = Instant::now() + timeout;
-        let pre_rewind = self.lock().last_rewind.clone().ok_or(CheckpointError::NothingToUndo)?;
+        let pre_rewind = self
+            .lock()
+            .last_rewind
+            .clone()
+            .ok_or(CheckpointError::NothingToUndo)?;
         let targets = pre_rewind
             .backups
             .iter()
@@ -503,14 +543,21 @@ impl FileHistory {
         targets: Vec<(PathBuf, Option<Backup>)>,
         deadline: Instant,
     ) -> Result<(Vec<Planned>, RewindReport), CheckpointError> {
-        let roots = self.roots.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let roots = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let mut plan = Vec::new();
         let mut report = RewindReport::default();
         for (path, backup) in targets {
             if Instant::now() >= deadline {
                 return Err(CheckpointError::TimedOut);
             }
-            let skip = |reason| Skipped { path: path.clone(), reason };
+            let skip = |reason| Skipped {
+                path: path.clone(),
+                reason,
+            };
             if let Err(reason) = store::writable_target(&path, &roots) {
                 report.skipped.push(skip(reason));
                 continue;
@@ -552,17 +599,24 @@ impl FileHistory {
         report: &mut RewindReport,
         deadline: Instant,
     ) -> Result<(), CheckpointError> {
-        let roots = self.roots.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let roots = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         for planned in plan {
             if Instant::now() >= deadline {
                 return Err(CheckpointError::TimedOut);
             }
             // Checked again: a folder on the way may have become a link since the plan.
             let written = store::writable_target(&planned.path, &roots).and_then(|()| {
-                store::restore(&self.dir, &planned.path, &planned.backup).map_err(|_| SkipReason::Io)
+                store::restore(&self.dir, &planned.path, &planned.backup)
+                    .map_err(|_| SkipReason::Io)
             });
             if let Err(reason) = written {
-                report.files_changed.retain(|change| change.path != planned.path);
+                report
+                    .files_changed
+                    .retain(|change| change.path != planned.path);
                 report.skipped.push(Skipped {
                     path: planned.path,
                     reason,
@@ -595,7 +649,9 @@ struct Planned {
 /// The backup a file had in the earliest snapshot that has it: its version 1 while that snapshot is kept (a
 /// snapshot without the file is older than that one).
 fn first_backup<'a>(snapshots: &'a [Snapshot], path: &Path) -> Option<&'a Backup> {
-    snapshots.iter().find_map(|snapshot| snapshot.backups.get(path))
+    snapshots
+        .iter()
+        .find_map(|snapshot| snapshot.backups.get(path))
 }
 
 /// Backup file names the kept snapshots and the undoable rewind still use.
@@ -604,7 +660,12 @@ fn referenced(state: &State) -> BTreeSet<String> {
         .snapshots
         .iter()
         .flat_map(|snapshot| snapshot.backups.values())
-        .chain(state.last_rewind.iter().flat_map(|pre| pre.backups.values()))
+        .chain(
+            state
+                .last_rewind
+                .iter()
+                .flat_map(|pre| pre.backups.values()),
+        )
         .filter_map(|backup| backup.file.clone())
         .collect()
 }

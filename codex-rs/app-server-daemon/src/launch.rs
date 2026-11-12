@@ -4,6 +4,7 @@
 use crate::Daemon;
 use crate::LifecycleOutput;
 use crate::ensure_supported_platform;
+use crate::telemetry::StartError;
 use anyhow::Result;
 use anyhow::ensure;
 use std::collections::BTreeMap;
@@ -11,11 +12,22 @@ use std::collections::BTreeMap;
 /// Start a missing daemon with these features, preserving other saved overrides,
 /// or leave a running daemon unchanged.
 /// Callers must check the running server's configuration before using it.
+/// Startup diagnostics go to tracing, so a caller with a live TUI can keep rendering.
 pub async fn start_with_features(features: &BTreeMap<String, bool>) -> Result<LifecycleOutput> {
+    start_with_features_classified(features)
+        .await
+        .map_err(|err| err.error)
+}
+
+/// Starts the daemon and classifies failures for the TUI startup counter.
+pub async fn start_with_features_classified(
+    features: &BTreeMap<String, bool>,
+) -> Result<LifecycleOutput, StartError> {
     ensure_supported_platform()?;
     #[cfg(windows)]
     crate::backend::windows::ensure_not_elevated()?;
-    let daemon = Daemon::from_environment()?;
+    let mut daemon = Daemon::from_environment()?;
+    daemon.log_diagnostics = true;
     let _operation_lock = daemon.acquire_operation_lock().await?;
     let selected = daemon.current_installation()?;
     let mut overrides = selected.load_settings().await?.feature_overrides;
@@ -37,9 +49,20 @@ pub async fn restart_with_features(features: &BTreeMap<String, bool>) -> Result<
 }
 
 impl Daemon {
-    pub(super) async fn restart(&self) -> Result<LifecycleOutput> {
-        self.restart_with_settings(self.load_settings().await?)
-            .await
+    pub(super) async fn restart(
+        &self,
+        features: &BTreeMap<String, bool>,
+    ) -> Result<LifecycleOutput> {
+        let mut settings = self.load_settings().await?;
+        // Explicit requests replace saved aliases as well as canonical keys.
+        settings.feature_overrides.retain(|name, _| {
+            let canonical = codex_features::feature_for_key(name)
+                .map(codex_features::Feature::key)
+                .unwrap_or(name);
+            !features.contains_key(canonical)
+        });
+        settings.feature_overrides.extend(features.clone());
+        self.restart_with_settings(settings).await
     }
 
     pub(super) async fn restart_with_features_locked(
@@ -54,7 +77,7 @@ impl Daemon {
         let previous = settings.feature_overrides.clone();
         settings.feature_overrides.extend(features.clone());
         if settings.feature_overrides == previous {
-            return self.start(&previous).await;
+            return self.start(&previous).await.map_err(|err| err.error);
         }
         self.restart_with_settings(settings).await
     }

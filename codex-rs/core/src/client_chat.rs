@@ -52,25 +52,23 @@ impl ModelClientSession {
                 .state
                 .provider
                 .include_internal_metadata(&client_setup.api_provider);
-            let transport = self.client.build_api_transport(
-                &client_setup.api_provider,
-                CHAT_COMPLETIONS_ENDPOINT,
-                client_setup.redirect_policy,
-            )?;
+            let transport = client_setup.http_transport(CHAT_COMPLETIONS_ENDPOINT)?;
             let request_auth_context = AuthRequestTelemetryContext::new(
                 client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
                 client_setup.agent_identity_telemetry.clone(),
                 pending_retry,
-            );
+            )
+            .map_err(|error| self.client.state.provider.map_api_error(error))?;
             let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
                 session_telemetry,
                 request_auth_context,
                 RequestRouteTelemetry::for_endpoint(CHAT_COMPLETIONS_ENDPOINT),
                 self.client.state.auth_env_telemetry.clone(),
             );
-            let mut options = self
+            let mut options = ResponsesHttpExecutor::new(&self.client)
                 .build_responses_options(
+                    &self.turn_state,
                     responses_metadata,
                     Compression::None,
                     model_info.use_responses_lite,
@@ -118,14 +116,14 @@ impl ModelClientSession {
 
             match client.stream_request(&request, options).await {
                 Ok(stream) => {
-                    let (stream, _) = map_response_stream(
+                    return Ok(map_response_stream(
                         stream,
                         request_session_telemetry,
                         inference_trace_attempt,
-                        Arc::clone(&self.client.state.provider),
+                        &self.client.state,
                         interceptors,
-                    );
-                    return Ok(stream);
+                        /*last_response_tx*/ None,
+                    ));
                 }
                 Err(ApiError::Transport(unauthorized_transport))
                     if self

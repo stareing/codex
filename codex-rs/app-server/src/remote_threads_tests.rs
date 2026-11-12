@@ -2,6 +2,7 @@ use super::*;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadListResponse;
+use codex_app_server_protocol::ThreadReadState;
 use codex_app_server_protocol::ThreadStatus;
 use codex_utils_absolute_path::test_support::PathBufExt;
 use codex_utils_absolute_path::test_support::test_path_buf;
@@ -161,6 +162,20 @@ fn every_listed_thread_method_names_its_thread() {
 fn thread_list_keeps_only_listed_sessions() {
     let response = ThreadListResponse {
         data: vec![thread("t1"), thread("t2")],
+        read_states: Some(
+            ["t1", "t2"]
+                .into_iter()
+                .map(|id| {
+                    (
+                        id.to_string(),
+                        ThreadReadState {
+                            first_unread: None,
+                            revision: "r1".to_string(),
+                        },
+                    )
+                })
+                .collect(),
+        ),
         next_cursor: None,
         backwards_cursor: None,
     };
@@ -177,6 +192,14 @@ fn thread_list_keeps_only_listed_sessions() {
             .map(|t| t.id.as_str())
             .collect::<Vec<_>>(),
         ["t2"]
+    );
+    assert_eq!(
+        filtered
+            .read_states
+            .as_ref()
+            .map(|states| states.keys().cloned().collect::<Vec<_>>()),
+        Some(vec!["t2".to_string()]),
+        "read receipts of unshared sessions are left out too"
     );
     let all = Shared {
         relay: true,
@@ -213,6 +236,7 @@ fn thread(id: &str) -> Thread {
         session_id: "session-1".to_string(),
         forked_from_id: None,
         parent_thread_id: None,
+        attached_to_thread_id: None,
         preview: String::new(),
         ephemeral: false,
         section: None,

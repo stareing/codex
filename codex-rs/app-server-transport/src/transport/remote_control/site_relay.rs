@@ -207,11 +207,12 @@ impl SiteRelayAuthProvider {
 }
 
 impl AuthProvider for SiteRelayAuthProvider {
-    fn add_auth_headers(&self, headers: &mut HeaderMap) {
+    fn add_auth_headers(&self, headers: &mut HeaderMap) -> Result<(), codex_api::AuthError> {
         headers.insert(
             axum::http::header::AUTHORIZATION,
             self.authorization.clone(),
         );
+        Ok(())
     }
 }
 

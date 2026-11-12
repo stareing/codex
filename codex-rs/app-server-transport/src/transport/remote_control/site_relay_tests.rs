@@ -174,8 +174,11 @@ async fn site_relay_auth_uses_the_device_token_without_an_upstream_login() {
     let relay = Arc::new(relay(&dir));
     let manager = signed_out_auth_manager(&codex_home).await;
 
-    let (auth, authenticated) =
-        RemoteControlAuth::capture_with_site_relay(manager.clone(), Some(relay.clone()));
+    let (auth, authenticated) = RemoteControlAuth::capture_with_site_relay(
+        manager.clone(),
+        /*runtime_auth*/ None,
+        Some(relay.clone()),
+    );
     assert!(!authenticated, "no token file yet");
     let missing = load_remote_control_auth(&auth)
         .await
@@ -184,14 +187,19 @@ async fn site_relay_auth_uses_the_device_token_without_an_upstream_login() {
     assert_eq!(missing.kind(), ErrorKind::PermissionDenied);
 
     std::fs::write(dir.path().join("device-token"), "dt_first\n").expect("token should write");
-    let (auth, authenticated) =
-        RemoteControlAuth::capture_with_site_relay(manager.clone(), Some(relay.clone()));
+    let (auth, authenticated) = RemoteControlAuth::capture_with_site_relay(
+        manager.clone(),
+        /*runtime_auth*/ None,
+        Some(relay.clone()),
+    );
     assert!(authenticated);
     let headers = load_remote_control_auth(&auth)
         .await
         .expect("credentials should load")
-        .request_headers()
-        .expect("headers should build");
+        .request_context("https://relay.example/control")
+        .await
+        .expect("headers should build")
+        .1;
     assert_eq!(
         headers
             .get(axum::http::header::AUTHORIZATION)
@@ -212,8 +220,10 @@ async fn site_relay_auth_uses_the_device_token_without_an_upstream_login() {
     let headers = load_remote_control_auth(&auth)
         .await
         .expect("credentials should load")
-        .request_headers()
-        .expect("headers should build");
+        .request_context("https://relay.example/control")
+        .await
+        .expect("headers should build")
+        .1;
     assert_eq!(
         headers
             .get(axum::http::header::AUTHORIZATION)
@@ -232,7 +242,7 @@ async fn upstream_mode_is_unchanged_when_no_relay_is_configured() {
     let manager = codex_core::test_support::auth_manager_from_auth(
         codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
     );
-    let (auth, authenticated) = RemoteControlAuth::capture(manager);
+    let (auth, authenticated) = RemoteControlAuth::capture(manager, /*runtime_auth*/ None);
     assert!(authenticated);
     assert!(auth.site_relay().is_none());
 }

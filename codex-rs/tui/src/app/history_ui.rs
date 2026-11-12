@@ -22,7 +22,24 @@ pub(super) struct ThreadUsageStatusHistory {
 }
 
 impl App {
-    pub(super) fn insert_history_cell(&mut self, tui: &mut tui::Tui, cell: Box<dyn HistoryCell>) {
+    pub(super) fn link_viewed_image(&self, cell: &mut dyn HistoryCell) {
+        if let Some(image) = cell
+            .as_any_mut()
+            .downcast_mut::<history_cell::ViewImageHistoryCell>()
+            && !self.app_server_target.uses_remote_workspace()
+            && crate::projectless::has_only_local_environments(&self.environment_manager)
+            && !crate::clipboard_copy::is_ssh_session()
+        {
+            image.link_local_image();
+        }
+    }
+
+    pub(super) fn insert_history_cell(
+        &mut self,
+        tui: &mut tui::Tui,
+        mut cell: Box<dyn HistoryCell>,
+    ) {
+        self.link_viewed_image(cell.as_mut());
         // Global deprecations can be delivered again by hidden threads. Scope deduplication to
         // retained history so clearing or rebuilding a transcript can show the notice again.
         if let Some(notice) = cell
@@ -281,11 +298,7 @@ impl App {
         if let Err(err) = webbrowser::open(&url) {
             self.chat_widget
                 .add_error_message(format!("Failed to open browser for {url}: {err}"));
-            return;
         }
-
-        self.chat_widget
-            .add_info_message(format!("Opened {url} in your browser."), /*hint*/ None);
     }
 
     pub(super) fn open_desktop_thread(&mut self, thread_id: ThreadId) {
@@ -307,7 +320,8 @@ impl App {
         width: u16,
         version: &'static str,
     ) -> Vec<Line<'static>> {
-        self.clear_ui_header_cell(version).display_lines(width)
+        self.clear_ui_header_cell(version)
+            .display_lines_for_mode(width, self.chat_widget.history_render_mode())
     }
 
     /// Share the source-backed header between retained drawing and legacy terminal insertion.
@@ -318,10 +332,6 @@ impl App {
         history_cell::SessionHeaderHistoryCell::new(
             self.chat_widget.model_display_name().to_string(),
             self.chat_widget.current_reasoning_effort(),
-            self.chat_widget.should_show_fast_status(
-                self.chat_widget.current_model(),
-                self.chat_widget.current_service_tier(),
-            ),
             self.config.cwd.to_path_buf(),
             version,
         )
@@ -330,6 +340,14 @@ impl App {
 
     pub(super) fn clear_ui_header_lines(&self, width: u16) -> Vec<Line<'static>> {
         self.clear_ui_header_lines_with_version(width, CODEX_CLI_VERSION)
+    }
+
+    pub(super) fn start_cleared_display(&mut self, tui: &mut tui::Tui) {
+        self.reset_terminal_display_state();
+        self.transcript_cells
+            .retain(|cell| !cell.as_any().is::<history_cell::ClearScreenHeader>());
+        let header = history_cell::ClearScreenHeader(self.clear_ui_header_cell(CODEX_CLI_VERSION));
+        self.insert_history_cell(tui, Box::new(header));
     }
 
     pub(super) fn queue_clear_ui_header(&mut self, tui: &mut tui::Tui) {
@@ -350,7 +368,10 @@ impl App {
             .history_wrap_width(tui.terminal.last_known_screen_size.width);
         let header_lines = self.clear_ui_header_lines(width);
         if !header_lines.is_empty() {
-            tui.insert_history_lines(header_lines);
+            tui.insert_history_lines_with_wrap_policy(
+                header_lines,
+                self.history_line_wrap_policy(),
+            );
             self.has_emitted_history_lines = true;
         }
     }
@@ -393,8 +414,12 @@ impl App {
     }
 
     pub(super) fn reset_transcript_state_after_clear(&mut self) {
-        self.overlay = None;
         self.transcript_cells.clear();
+        self.reset_terminal_display_state();
+    }
+
+    fn reset_terminal_display_state(&mut self) {
+        self.overlay = None;
         self.turn_tips.dismiss();
         self.chat_widget.warning_display_state.dismissed.clear();
         self.chat_widget.warning_display_state.transcript = Arc::default();
@@ -402,6 +427,7 @@ impl App {
         self.native_history = Default::default();
         self.cancel_pending_key_chord();
         self.transcript_view = Default::default();
+        *self.chat_widget.rendered_selection.borrow_mut() = Default::default();
         self.last_rendered_history_tail = None;
         self.last_thread_usage_status_cell = None;
         self.pending_thread_usage_history_refresh = false;

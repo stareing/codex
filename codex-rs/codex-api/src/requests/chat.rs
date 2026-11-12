@@ -41,10 +41,8 @@ pub(crate) fn build_chat_request(
     };
     let tools = convert_tools(&responses_tools);
 
+    // Base instructions arrive as the leading developer message of `input`, which becomes the system message.
     let mut builder = MessageBuilder::default();
-    if !request.instructions.is_empty() {
-        builder.push(json!({"role": "system", "content": request.instructions}));
-    }
     for item in &request.input {
         builder.push_item(item);
     }
@@ -196,7 +194,7 @@ impl MessageBuilder {
         let text = content
             .iter()
             .filter_map(|part| match part {
-                ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                ContentItem::InputText { text } | ContentItem::OutputText { text, .. } => {
                     Some(text.as_str())
                 }
                 ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => None,
@@ -265,7 +263,7 @@ impl MessageBuilder {
 
 fn content_part(part: &ContentItem) -> Option<Value> {
     match part {
-        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+        ContentItem::InputText { text } | ContentItem::OutputText { text, .. } => {
             Some(json!({"type": "text", "text": text}))
         }
         ContentItem::InputImage { image, .. } => image_part(image),
