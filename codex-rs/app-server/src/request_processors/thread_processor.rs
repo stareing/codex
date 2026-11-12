@@ -2603,7 +2603,16 @@ impl ThreadRequestProcessor {
         let ThreadCompactStartParams {
             thread_id,
             instructions,
+            from_turn_id,
         } = params;
+        // Checked before the thread is looked up: an empty value is how clients probe for this
+        // field without side effects (older agents ignore it and answer with the lookup error).
+        if from_turn_id
+            .as_deref()
+            .is_some_and(|id| id.trim().is_empty())
+        {
+            return Err(invalid_request("fromTurnId must not be empty"));
+        }
 
         let (_, thread) = self.load_thread(&thread_id).await?;
         ensure_direct_input_allowed(thread.as_ref()).await?;
@@ -2611,9 +2620,32 @@ impl ThreadRequestProcessor {
             .check_thread_model_provider(thread.config().await.as_ref())
             .await
             .map_err(|error| config_load_error(&error))?;
-        let op = match instructions.filter(|text| !text.trim().is_empty()) {
-            Some(instructions) => Op::CompactWithInstructions { instructions },
-            None => Op::Compact,
+        let instructions = instructions.filter(|text| !text.trim().is_empty());
+        let op = match (from_turn_id, instructions) {
+            (Some(from_turn_id), instructions) => {
+                // Starting a compaction aborts the running turn; summarizing from a message must
+                // not cut a turn short (Claude Code only offers it while idle).
+                if matches!(thread.agent_status().await, AgentStatus::Running) {
+                    return Err(invalid_request(
+                        codex_core::compact::PARTIAL_COMPACTION_TURN_IN_PROGRESS,
+                    ));
+                }
+                thread
+                    .check_partial_compaction(&from_turn_id)
+                    .await
+                    .map_err(|err| match err.details() {
+                        CodexErrorDetails::InvalidRequest(message) => invalid_request(message),
+                        _ => {
+                            internal_error(format!("failed to check the partial compaction: {err}"))
+                        }
+                    })?;
+                Op::CompactFrom {
+                    from_turn_id,
+                    instructions,
+                }
+            }
+            (None, Some(instructions)) => Op::CompactWithInstructions { instructions },
+            (None, None) => Op::Compact,
         };
         self.submit_core_op(request_id, thread.as_ref(), op)
             .await

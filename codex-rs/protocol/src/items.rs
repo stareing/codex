@@ -544,6 +544,12 @@ pub struct ContextCompactionItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub summary: Option<String>,
+    /// Set for a partial compaction ("summarize from here"): the turn whose first user message
+    /// starts the summarized part. Everything before that turn was kept verbatim; that turn and
+    /// every later one were replaced by `summary`. Absent for a whole-thread compaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub from_turn_id: Option<String>,
 }
 
 fn new_item_id() -> String {
@@ -555,6 +561,15 @@ impl ContextCompactionItem {
         Self {
             id: new_item_id(),
             summary: None,
+            from_turn_id: None,
+        }
+    }
+
+    /// The same item, for a compaction that summarizes only from `turn_id` on.
+    pub fn from_turn(self, turn_id: String) -> Self {
+        Self {
+            from_turn_id: Some(turn_id),
+            ..self
         }
     }
 

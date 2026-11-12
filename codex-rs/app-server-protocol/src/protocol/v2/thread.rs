@@ -1223,6 +1223,17 @@ pub struct ThreadCompactStartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub instructions: Option<String>,
+    /// Summarize only from this turn on ("summarize from here"): the history before the turn's
+    /// first user message stays verbatim; this turn and every later one are replaced by one
+    /// summary. Absent = the whole thread. The turn must be a finished turn of the thread.
+    ///
+    /// Agents older than this field ignore it and compact the whole thread. An empty value is
+    /// refused before the thread is even looked up (`fromTurnId must not be empty`), so a client
+    /// can probe for support without side effects by sending an empty `fromTurnId` with any
+    /// thread id: older agents answer with the thread lookup error instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub from_turn_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

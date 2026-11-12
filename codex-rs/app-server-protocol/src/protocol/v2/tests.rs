@@ -469,6 +469,7 @@ fn thread_items_list_round_trips() {
                     payload: ThreadItemPayload::ContextCompaction {
                         id: "item_1".to_string(),
                         summary: None,
+                        from_turn_id: None,
                     },
                     started_at_ms,
                     completed_at_ms,
@@ -5667,4 +5668,59 @@ fn feedback_paths_preserve_native_wire_spelling_before_host_validation() {
             path
         );
     }
+}
+
+#[test]
+fn thread_compact_start_from_turn_round_trips_and_stays_optional() {
+    let whole: ThreadCompactStartParams =
+        serde_json::from_value(json!({"threadId": "thr_1"})).expect("whole-thread params");
+    assert_eq!(whole.from_turn_id, None);
+    assert_eq!(
+        serde_json::to_value(&whole).expect("serialize"),
+        json!({"threadId": "thr_1"})
+    );
+
+    let partial = ThreadCompactStartParams {
+        thread_id: "thr_1".to_string(),
+        instructions: Some("User context: keep the API notes".to_string()),
+        from_turn_id: Some("turn_2".to_string()),
+    };
+    let value = serde_json::to_value(&partial).expect("serialize");
+    assert_eq!(
+        value,
+        json!({
+            "threadId": "thr_1",
+            "instructions": "User context: keep the API notes",
+            "fromTurnId": "turn_2",
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<ThreadCompactStartParams>(value).expect("deserialize"),
+        partial
+    );
+}
+
+#[test]
+fn partial_context_compaction_item_carries_from_turn_id() {
+    let item = ThreadItemPayload::from(TurnItem::ContextCompaction(
+        codex_protocol::items::ContextCompactionItem::new()
+            .from_turn("turn_2".to_string())
+            .with_summary("what happened since".to_string()),
+    ));
+    let value = serde_json::to_value(&item).expect("serialize");
+    assert_eq!(value["type"], "contextCompaction");
+    assert_eq!(value["fromTurnId"], "turn_2");
+    assert_eq!(value["summary"], "what happened since");
+    assert_eq!(
+        serde_json::from_value::<ThreadItemPayload>(value).expect("deserialize"),
+        item
+    );
+
+    let whole = ThreadItemPayload::from(TurnItem::ContextCompaction(
+        codex_protocol::items::ContextCompactionItem::new(),
+    ));
+    assert!(
+        serde_json::to_value(&whole).expect("serialize")["fromTurnId"].is_null(),
+        "a whole-thread compaction leaves fromTurnId out"
+    );
 }

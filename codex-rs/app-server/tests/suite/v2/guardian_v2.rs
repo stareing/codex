@@ -1902,6 +1902,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
                     .send_thread_compact_start_request(ThreadCompactStartParams {
                         thread_id: thread_id.clone(),
                         instructions: None,
+                        from_turn_id: None,
                     })
                     .await?;
                 let _: ThreadCompactStartResponse =

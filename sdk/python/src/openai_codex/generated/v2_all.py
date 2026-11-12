@@ -5682,6 +5682,13 @@ class ThreadCompactStartParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    from_turn_id: Annotated[
+        str | None,
+        Field(
+            alias="fromTurnId",
+            description='Summarize only from this turn on ("summarize from here"): the history before the turn\'s first user message stays verbatim; this turn and every later one are replaced by one summary. Absent = the whole thread. The turn must be a finished turn of the thread.\n\nAgents older than this field ignore it and compact the whole thread. An empty value is refused before the thread is even looked up (`fromTurnId must not be empty`), so a client can probe for support without side effects by sending an empty `fromTurnId` with any thread id: older agents answer with the thread lookup error instead.',
+        ),
+    ] = None
     instructions: Annotated[
         str | None,
         Field(
@@ -6178,6 +6185,13 @@ class ContextCompactionThreadItem(BaseModel):
         Field(
             alias="completedAtMs",
             description="Unix timestamp in milliseconds when the item completed, if recorded.",
+        ),
+    ] = None
+    from_turn_id: Annotated[
+        str | None,
+        Field(
+            alias="fromTurnId",
+            description='Set for a partial compaction ("summarize from here"): the turns before this one were kept verbatim, this turn and every later one were replaced by `summary`. Absent for a whole-thread compaction.',
         ),
     ] = None
     id: str

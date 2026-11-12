@@ -6,4 +6,15 @@ export type ThreadCompactStartParams = { threadId: string,
 /**
  * What the summary should focus on (`/compact <instructions>`); appended to the summarization prompt.
  */
-instructions?: string, };
+instructions?: string,
+/**
+ * Summarize only from this turn on ("summarize from here"): the history before the turn's
+ * first user message stays verbatim; this turn and every later one are replaced by one
+ * summary. Absent = the whole thread. The turn must be a finished turn of the thread.
+ *
+ * Agents older than this field ignore it and compact the whole thread. An empty value is
+ * refused before the thread is even looked up (`fromTurnId must not be empty`), so a client
+ * can probe for support without side effects by sending an empty `fromTurnId` with any
+ * thread id: older agents answer with the thread lookup error instead.
+ */
+fromTurnId?: string, };
