@@ -36,6 +36,7 @@ use crate::tools::handlers::file_reads::FileReadLedger;
 use crate::tools::handlers::file_reads::ReadOutcome;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::resolve_tool_environment;
+use crate::tools::handlers::shown_tool::shown;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::sandboxing::ToolCtx;
@@ -627,44 +628,41 @@ impl ToolExecutor<ToolInvocation> for ReadFileHandler {
         ToolInvocation: 'a,
     {
         Box::pin(async move {
-            let arguments = function_arguments(invocation.payload.clone(), READ_TOOL_NAME)?;
-            let args: ReadArgs = parse_arguments(&arguments)?;
-            let target = Target::resolve(
-                &invocation,
-                READ_TOOL_NAME,
-                &args.file_path,
-                args.environment_id.as_deref(),
-                self.multi_environment,
-            )?;
-            target
-                .ensure(&invocation, READ_TOOL_NAME, &args.file_path, Access::Read)
-                .await?;
-            let fs = target.environment.environment.get_filesystem();
-            let Some(text) = target.read_text(fs.as_ref()).await? else {
-                return Err(refuse(format!("`{}` does not exist", target.shown)));
-            };
-            let offset = args.offset.unwrap_or(1).max(1);
-            let limit = args.limit.filter(|l| *l > 0).unwrap_or(DEFAULT_READ_LINES);
-            if ledger(&invocation).read(target.key(), target.path.clone(), &text, offset, limit)
-                == ReadOutcome::Unchanged
-            {
-                return Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                    format!(
+            let work = async {
+                let arguments = function_arguments(invocation.payload.clone(), READ_TOOL_NAME)?;
+                let args: ReadArgs = parse_arguments(&arguments)?;
+                let target = Target::resolve(
+                    &invocation,
+                    READ_TOOL_NAME,
+                    &args.file_path,
+                    args.environment_id.as_deref(),
+                    self.multi_environment,
+                )?;
+                target
+                    .ensure(&invocation, READ_TOOL_NAME, &args.file_path, Access::Read)
+                    .await?;
+                let fs = target.environment.environment.get_filesystem();
+                let Some(text) = target.read_text(fs.as_ref()).await? else {
+                    return Err(refuse(format!("`{}` does not exist", target.shown)));
+                };
+                let offset = args.offset.unwrap_or(1).max(1);
+                let limit = args.limit.filter(|l| *l > 0).unwrap_or(DEFAULT_READ_LINES);
+                if ledger(&invocation).read(target.key(), target.path.clone(), &text, offset, limit)
+                    == ReadOutcome::Unchanged
+                {
+                    return Ok(format!(
                         "`{}` is unchanged since the last Read of these lines in this conversation; that output is still above, use it instead of reading again",
                         target.shown
-                    ),
-                    Some(true),
-                )));
-            }
-            let budget = codex_protocol::protocol::TruncationPolicy::from(
-                invocation.turn.model_info().truncation_policy,
-            )
-            .byte_budget();
-            let body = numbered(&text, offset, limit, budget);
-            Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                body,
-                Some(true),
-            )))
+                    ));
+                }
+                let budget = codex_protocol::protocol::TruncationPolicy::from(
+                    invocation.turn.model_info().truncation_policy,
+                )
+                .byte_budget();
+                let body = numbered(&text, offset, limit, budget);
+                Ok::<String, FunctionCallError>(body)
+            };
+            shown(&invocation, READ_TOOL_NAME, work).await
         })
     }
 }

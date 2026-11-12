@@ -31,9 +31,7 @@ use serde_json::Value;
 
 use crate::function_tool::FunctionCallError;
 use crate::session::turn_context::TurnEnvironment;
-use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
-use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::file_access::Access;
 use crate::tools::handlers::file_access::ensure_access;
 use crate::tools::handlers::file_tools::function_arguments;
@@ -42,6 +40,7 @@ use crate::tools::handlers::file_tools::properties;
 use crate::tools::handlers::file_tools::refuse;
 use crate::tools::handlers::file_tools::text;
 use crate::tools::handlers::file_tools::turn_environment;
+use crate::tools::handlers::shown_tool::shown;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 
@@ -472,75 +471,75 @@ impl ToolExecutor<ToolInvocation> for GlobHandler {
         ToolInvocation: 'a,
     {
         Box::pin(async move {
-            let tool = GLOB_TOOL_NAME;
-            let map = arguments(
-                &invocation,
-                tool,
-                &allowed_keys(&["pattern", "path"], self.multi_environment),
-            )?;
-            let Some(pattern) = string_arg(&map, tool, "pattern")? else {
-                return Err(refuse(format!("{tool}: `pattern` is required")));
-            };
-            let path = string_arg(&map, tool, "path")?;
-            let environment_id = string_arg(&map, tool, "environment_id")?;
-            let environment = turn_environment(
-                &invocation,
-                tool,
-                environment_id.as_deref(),
-                self.multi_environment,
-            )?;
-            let scope = SearchScope::new(tool, &environment)?;
-            let mut search_dir = match &path {
-                Some(raw) => {
-                    let dir = scope.expand(raw);
-                    if !dir.exists() {
-                        return Err(scope.missing("Directory", raw, &dir));
+            let work = async {
+                let tool = GLOB_TOOL_NAME;
+                let map = arguments(
+                    &invocation,
+                    tool,
+                    &allowed_keys(&["pattern", "path"], self.multi_environment),
+                )?;
+                let Some(pattern) = string_arg(&map, tool, "pattern")? else {
+                    return Err(refuse(format!("{tool}: `pattern` is required")));
+                };
+                let path = string_arg(&map, tool, "path")?;
+                let environment_id = string_arg(&map, tool, "environment_id")?;
+                let environment = turn_environment(
+                    &invocation,
+                    tool,
+                    environment_id.as_deref(),
+                    self.multi_environment,
+                )?;
+                let scope = SearchScope::new(tool, &environment)?;
+                let mut search_dir = match &path {
+                    Some(raw) => {
+                        let dir = scope.expand(raw);
+                        if !dir.exists() {
+                            return Err(scope.missing("Directory", raw, &dir));
+                        }
+                        if !dir.is_dir() {
+                            return Err(refuse(format!("Path is not a directory: {raw}")));
+                        }
+                        dir
                     }
-                    if !dir.is_dir() {
-                        return Err(refuse(format!("Path is not a directory: {raw}")));
+                    None => scope.cwd.clone(),
+                };
+                let mut relative_pattern = pattern;
+                if Path::new(&relative_pattern).is_absolute() {
+                    let (base, rest) = rg_search::split_absolute_glob(&relative_pattern);
+                    if !base.as_os_str().is_empty() {
+                        search_dir = base;
+                        relative_pattern = rest;
                     }
-                    dir
                 }
-                None => scope.cwd.clone(),
-            };
-            let mut relative_pattern = pattern;
-            if Path::new(&relative_pattern).is_absolute() {
-                let (base, rest) = rg_search::split_absolute_glob(&relative_pattern);
-                if !base.as_os_str().is_empty() {
-                    search_dir = base;
-                    relative_pattern = rest;
-                }
-            }
-            let asked = path.as_deref().unwrap_or(".");
-            ensure_access(
-                &invocation,
-                &environment,
-                tool,
-                asked,
-                &search_dir,
-                Access::Read,
-            )
-            .await?;
-            let cwd = scope.cwd.clone();
-            let readable = Arc::clone(&scope.readable);
-            let found = run_search(&invocation, move |cancelled| {
-                rg_search::glob_files(
-                    &cwd,
+                let asked = path.as_deref().unwrap_or(".");
+                ensure_access(
+                    &invocation,
+                    &environment,
+                    tool,
+                    asked,
                     &search_dir,
-                    &relative_pattern,
-                    GLOB_MAX_RESULTS,
-                    &readable,
-                    Limits::default(),
-                    cancelled,
+                    Access::Read,
                 )
-            })
-            .await?
-            .map_err(|err| search_error(tool, err))?;
-            let files: Vec<String> = found.files.iter().map(|path| scope.shown(path)).collect();
-            Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                glob_result(&files, found.truncated),
-                Some(true),
-            )))
+                .await?;
+                let cwd = scope.cwd.clone();
+                let readable = Arc::clone(&scope.readable);
+                let found = run_search(&invocation, move |cancelled| {
+                    rg_search::glob_files(
+                        &cwd,
+                        &search_dir,
+                        &relative_pattern,
+                        GLOB_MAX_RESULTS,
+                        &readable,
+                        Limits::default(),
+                        cancelled,
+                    )
+                })
+                .await?
+                .map_err(|err| search_error(tool, err))?;
+                let files: Vec<String> = found.files.iter().map(|path| scope.shown(path)).collect();
+                Ok::<String, FunctionCallError>(glob_result(&files, found.truncated))
+            };
+            shown(&invocation, GLOB_TOOL_NAME, work).await
         })
     }
 }
@@ -647,113 +646,114 @@ impl ToolExecutor<ToolInvocation> for GrepHandler {
         ToolInvocation: 'a,
     {
         Box::pin(async move {
-            let tool = GREP_TOOL_NAME;
-            let map = arguments(
-                &invocation,
-                tool,
-                &allowed_keys(&GREP_KEYS, self.multi_environment),
-            )?;
-            let Some(pattern) = string_arg(&map, tool, "pattern")? else {
-                return Err(refuse(format!("{tool}: `pattern` is required")));
-            };
-            let mode = match string_arg(&map, tool, "output_mode")?.as_deref() {
-                None | Some("files_with_matches") => GrepMode::FilesWithMatches,
-                Some("content") => GrepMode::Content,
-                Some("count") => GrepMode::Count,
-                Some(other) => {
-                    return Err(refuse(format!(
-                        "{tool}: output_mode must be content, files_with_matches or count, not `{other}`"
-                    )));
-                }
-            };
-            // `context`, then `-C`, then `-B`/`-A` (Claude Code's precedence).
-            let (before, after) = match (
-                count_arg(&map, tool, "context")?,
-                count_arg(&map, tool, "-C")?,
-            ) {
-                (Some(both), _) | (None, Some(both)) => (both, both),
-                (None, None) => (
-                    count_arg(&map, tool, "-B")?.unwrap_or(0),
-                    count_arg(&map, tool, "-A")?.unwrap_or(0),
-                ),
-            };
-            let head_limit = count_arg(&map, tool, "head_limit")?;
-            let offset = count_arg(&map, tool, "offset")?.unwrap_or(0);
-            let environment_id = string_arg(&map, tool, "environment_id")?;
-            let environment = turn_environment(
-                &invocation,
-                tool,
-                environment_id.as_deref(),
-                self.multi_environment,
-            )?;
-            let scope = SearchScope::new(tool, &environment)?;
-            let raw_path = string_arg(&map, tool, "path")?;
-            let target = match &raw_path {
-                Some(raw) => {
-                    let target = scope.expand(raw);
-                    if !target.exists() {
-                        return Err(scope.missing("Path", raw, &target));
+            let work = async {
+                let tool = GREP_TOOL_NAME;
+                let map = arguments(
+                    &invocation,
+                    tool,
+                    &allowed_keys(&GREP_KEYS, self.multi_environment),
+                )?;
+                let Some(pattern) = string_arg(&map, tool, "pattern")? else {
+                    return Err(refuse(format!("{tool}: `pattern` is required")));
+                };
+                let mode = match string_arg(&map, tool, "output_mode")?.as_deref() {
+                    None | Some("files_with_matches") => GrepMode::FilesWithMatches,
+                    Some("content") => GrepMode::Content,
+                    Some("count") => GrepMode::Count,
+                    Some(other) => {
+                        return Err(refuse(format!(
+                            "{tool}: output_mode must be content, files_with_matches or count, not `{other}`"
+                        )));
                     }
-                    target
-                }
-                None => scope.cwd.clone(),
-            };
-            let asked = raw_path.as_deref().unwrap_or(".");
-            ensure_access(
-                &invocation,
-                &environment,
-                tool,
-                asked,
-                &target,
-                Access::Read,
-            )
-            .await?;
-            let request = GrepRequest {
-                cwd: scope.cwd.clone(),
-                target,
-                pattern,
-                globs: string_arg(&map, tool, "glob")?
-                    .map_or_else(Vec::new, |raw| split_globs(&raw)),
-                file_type: string_arg(&map, tool, "type")?.filter(|name| !name.is_empty()),
-                mode,
-                before_context: before,
-                after_context: after,
-                line_numbers: flag_arg(&map, tool, "-n")?.unwrap_or(true),
-                case_insensitive: flag_arg(&map, tool, "-i")?.unwrap_or(false),
-                multiline: flag_arg(&map, tool, "multiline")?.unwrap_or(false),
-            };
-            let readable = Arc::clone(&scope.readable);
-            let found = run_search(&invocation, move |cancelled| {
-                rg_search::grep(&request, &readable, Limits::default(), cancelled).map(
-                    |mut found| {
-                        if request.mode == GrepMode::FilesWithMatches {
-                            found.files = newest_first(found.files);
+                };
+                // `context`, then `-C`, then `-B`/`-A` (Claude Code's precedence).
+                let (before, after) = match (
+                    count_arg(&map, tool, "context")?,
+                    count_arg(&map, tool, "-C")?,
+                ) {
+                    (Some(both), _) | (None, Some(both)) => (both, both),
+                    (None, None) => (
+                        count_arg(&map, tool, "-B")?.unwrap_or(0),
+                        count_arg(&map, tool, "-A")?.unwrap_or(0),
+                    ),
+                };
+                let head_limit = count_arg(&map, tool, "head_limit")?;
+                let offset = count_arg(&map, tool, "offset")?.unwrap_or(0);
+                let environment_id = string_arg(&map, tool, "environment_id")?;
+                let environment = turn_environment(
+                    &invocation,
+                    tool,
+                    environment_id.as_deref(),
+                    self.multi_environment,
+                )?;
+                let scope = SearchScope::new(tool, &environment)?;
+                let raw_path = string_arg(&map, tool, "path")?;
+                let target = match &raw_path {
+                    Some(raw) => {
+                        let target = scope.expand(raw);
+                        if !target.exists() {
+                            return Err(scope.missing("Path", raw, &target));
                         }
-                        found
-                    },
+                        target
+                    }
+                    None => scope.cwd.clone(),
+                };
+                let asked = raw_path.as_deref().unwrap_or(".");
+                ensure_access(
+                    &invocation,
+                    &environment,
+                    tool,
+                    asked,
+                    &target,
+                    Access::Read,
                 )
-            })
-            .await?
-            .map_err(|err| search_error(tool, err))?;
-            let body = match mode {
-                GrepMode::Content => {
-                    let (lines, limit) = head_limited(found.lines, head_limit, offset);
-                    content_result(&lines, limit, offset)
-                }
-                GrepMode::Count => {
-                    let (lines, limit) = head_limited(found.lines, head_limit, offset);
-                    count_result(&lines, limit, offset)
-                }
-                GrepMode::FilesWithMatches => {
-                    let (files, limit) = head_limited(found.files, head_limit, offset);
-                    let files: Vec<String> = files.iter().map(|path| scope.shown(path)).collect();
-                    files_result(&files, limit, offset)
-                }
+                .await?;
+                let request = GrepRequest {
+                    cwd: scope.cwd.clone(),
+                    target,
+                    pattern,
+                    globs: string_arg(&map, tool, "glob")?
+                        .map_or_else(Vec::new, |raw| split_globs(&raw)),
+                    file_type: string_arg(&map, tool, "type")?.filter(|name| !name.is_empty()),
+                    mode,
+                    before_context: before,
+                    after_context: after,
+                    line_numbers: flag_arg(&map, tool, "-n")?.unwrap_or(true),
+                    case_insensitive: flag_arg(&map, tool, "-i")?.unwrap_or(false),
+                    multiline: flag_arg(&map, tool, "multiline")?.unwrap_or(false),
+                };
+                let readable = Arc::clone(&scope.readable);
+                let found = run_search(&invocation, move |cancelled| {
+                    rg_search::grep(&request, &readable, Limits::default(), cancelled).map(
+                        |mut found| {
+                            if request.mode == GrepMode::FilesWithMatches {
+                                found.files = newest_first(found.files);
+                            }
+                            found
+                        },
+                    )
+                })
+                .await?
+                .map_err(|err| search_error(tool, err))?;
+                let body = match mode {
+                    GrepMode::Content => {
+                        let (lines, limit) = head_limited(found.lines, head_limit, offset);
+                        content_result(&lines, limit, offset)
+                    }
+                    GrepMode::Count => {
+                        let (lines, limit) = head_limited(found.lines, head_limit, offset);
+                        count_result(&lines, limit, offset)
+                    }
+                    GrepMode::FilesWithMatches => {
+                        let (files, limit) = head_limited(found.files, head_limit, offset);
+                        let files: Vec<String> =
+                            files.iter().map(|path| scope.shown(path)).collect();
+                        files_result(&files, limit, offset)
+                    }
+                };
+                Ok::<String, FunctionCallError>(body)
             };
-            Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                body,
-                Some(true),
-            )))
+            shown(&invocation, GREP_TOOL_NAME, work).await
         })
     }
 }

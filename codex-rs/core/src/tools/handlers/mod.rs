@@ -30,6 +30,7 @@ pub(crate) mod request_user_input_spec;
 pub(crate) mod search_tools;
 mod send_message_to_user_async;
 pub(crate) mod shell_spec;
+pub(crate) mod shown_tool;
 mod sleep;
 mod test_sync;
 pub(crate) mod test_sync_spec;
