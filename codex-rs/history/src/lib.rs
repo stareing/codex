@@ -108,6 +108,11 @@ pub struct CodexHarnessMetadata {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compaction_output: bool,
 
+    /// This summary replaced only the recent part of the history (a partial compaction, "summarize
+    /// from here"); the items before it were kept verbatim and can still start another one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub partial_compaction_summary: bool,
+
     /// Copied parent user/assistant context must not become child-local authorization.
     /// The serialized field name is retained for compatibility with saved history.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

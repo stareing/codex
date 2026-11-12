@@ -127,4 +127,10 @@ agentsStates: { [key in string]?: CollabAgentState }, } | { "type": "subAgentAct
  * The summary the history was replaced with; absent while compacting, for remote
  * compaction and for rollouts written before it was recorded.
  */
-summary?: string, };
+summary?: string,
+/**
+ * Set for a partial compaction ("summarize from here"): the turns before this one were
+ * kept verbatim, this turn and every later one were replaced by `summary`. Absent for a
+ * whole-thread compaction.
+ */
+fromTurnId?: string, };

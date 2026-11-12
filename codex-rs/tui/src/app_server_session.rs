@@ -1524,6 +1524,7 @@ impl AppServerSession {
                 params: ThreadCompactStartParams {
                     thread_id: thread_id.to_string(),
                     instructions: None,
+                    from_turn_id: None,
                 },
             })
             .await

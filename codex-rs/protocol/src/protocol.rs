@@ -741,6 +741,15 @@ pub enum Op {
     /// (`/compact <instructions>`); they are appended to the summarization prompt.
     CompactWithInstructions { instructions: String },
 
+    /// Summarize only from `from_turn_id` on ("summarize from here"): the history before that
+    /// turn's first user message stays verbatim, that turn and every later one are replaced by one
+    /// summary. `instructions` are appended to the summarization prompt like
+    /// `CompactWithInstructions`.
+    CompactFrom {
+        from_turn_id: String,
+        instructions: Option<String>,
+    },
+
     /// Set whether the thread remains eligible for memory generation.
     ///
     /// This persists thread-level memory mode metadata without involving the
@@ -961,6 +970,7 @@ impl Op {
             Self::ReloadUserConfig => "reload_user_config",
             Self::Compact => "compact",
             Self::CompactWithInstructions { .. } => "compact_with_instructions",
+            Self::CompactFrom { .. } => "compact_from",
             Self::SetThreadMemoryMode { .. } => "set_thread_memory_mode",
             Self::Review { .. } => "review",
             Self::ApproveGuardianDeniedAction { .. } => "approve_guardian_denied_action",

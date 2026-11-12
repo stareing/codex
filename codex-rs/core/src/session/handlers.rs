@@ -252,6 +252,42 @@ pub async fn compact(sess: &Arc<Session>, sub_id: String, instructions: Option<S
         .await;
 }
 
+/// "Summarize from here": like `compact`, but only `from_turn_id` and later turns are summarized.
+pub async fn compact_from(
+    sess: &Arc<Session>,
+    sub_id: String,
+    from_turn_id: String,
+    instructions: Option<String>,
+) {
+    // Unlike a whole-thread compaction, summarizing from a message never replaces a running turn
+    // (Claude Code only offers it while idle). The app-server refuses this up front; this check
+    // covers a turn submitted just before, which is not running yet when the app-server looks.
+    if sess
+        .active_turn_context_and_cancellation_token()
+        .await
+        .is_some()
+    {
+        let message = crate::compact::PARTIAL_COMPACTION_TURN_IN_PROGRESS.to_string();
+        tracing::warn!("{message}");
+        sess.send_event_raw(Event {
+            id: sub_id,
+            msg: EventMsg::Warning(WarningEvent { message }),
+        })
+        .await;
+        return;
+    }
+    let turn_context = sess
+        .new_turn_with_default_settings(sub_id, Default::default())
+        .await;
+
+    sess.spawn_task(
+        turn_context,
+        Vec::new(),
+        CompactTask::from_turn(instructions, from_turn_id),
+    )
+    .await;
+}
+
 pub(super) async fn persist_thread_memory_mode_update(
     sess: &Arc<Session>,
     mode: ThreadMemoryMode,
@@ -605,6 +641,13 @@ pub(super) async fn submission_loop(
                 }
                 Op::CompactWithInstructions { instructions } => {
                     compact(&sess, sub.id.clone(), Some(instructions)).await;
+                    false
+                }
+                Op::CompactFrom {
+                    from_turn_id,
+                    instructions,
+                } => {
+                    compact_from(&sess, sub.id.clone(), from_turn_id, instructions).await;
                     false
                 }
                 Op::SetThreadMemoryMode { mode } => {

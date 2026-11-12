@@ -16,6 +16,7 @@ fn compaction_started(id: &str) -> ServerNotification {
         item: AppServerThreadItem::ContextCompaction {
             id: id.to_string(),
             summary: None,
+            from_turn_id: None,
         },
     })
 }
@@ -28,6 +29,7 @@ fn compaction_completed(id: &str) -> ServerNotification {
         item: AppServerThreadItem::ContextCompaction {
             id: id.to_string(),
             summary: None,
+            from_turn_id: None,
         },
     })
 }

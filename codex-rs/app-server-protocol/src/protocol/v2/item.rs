@@ -430,6 +430,12 @@ pub enum ThreadItem {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         summary: Option<String>,
+        /// Set for a partial compaction ("summarize from here"): the turns before this one were
+        /// kept verbatim, this turn and every later one were replaced by `summary`. Absent for a
+        /// whole-thread compaction.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        from_turn_id: Option<String>,
     },
 }
 
@@ -1060,12 +1066,11 @@ impl From<CoreTurnItem> for ThreadItem {
                     duration_ms,
                 }
             }
-            CoreTurnItem::ContextCompaction(compaction) => {
-                ThreadItem::ContextCompaction {
-                    id: compaction.id,
-                    summary: compaction.summary,
-                }
-            }
+            CoreTurnItem::ContextCompaction(compaction) => ThreadItem::ContextCompaction {
+                id: compaction.id,
+                summary: compaction.summary,
+                from_turn_id: compaction.from_turn_id,
+            },
         }
     }
 }

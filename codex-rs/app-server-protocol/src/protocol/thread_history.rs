@@ -1179,7 +1179,11 @@ impl ThreadHistoryBuilder {
 
     fn handle_context_compacted(&mut self, _payload: &ContextCompactedEvent) {
         let id = self.next_item_id();
-        self.push_item_in_current_turn(ThreadItem::ContextCompaction { id, summary: None });
+        self.push_item_in_current_turn(ThreadItem::ContextCompaction {
+            id,
+            summary: None,
+            from_turn_id: None,
+        });
     }
 
     fn handle_entered_review_mode(
@@ -4566,10 +4570,12 @@ mod tests {
         let with_summary = codex_protocol::items::ContextCompactionItem {
             id: "compact-new".into(),
             summary: Some("what was done so far".into()),
+            from_turn_id: Some("turn-0".into()),
         };
         let without = codex_protocol::items::ContextCompactionItem {
             id: "compact-old".into(),
             summary: None,
+            from_turn_id: None,
         };
         let events = vec![
             EventMsg::TurnStarted(TurnStartedEvent {
@@ -4604,6 +4610,7 @@ mod tests {
             vec![ThreadItem::ContextCompaction {
                 id: "compact-new".into(),
                 summary: Some("what was done so far".into()),
+                from_turn_id: Some("turn-0".into()),
             }]
         );
     }

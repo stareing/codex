@@ -716,6 +716,18 @@ impl CodexThread {
         self.session.token_usage_info().await
     }
 
+    /// Checks, without starting it, that a partial compaction ("summarize from here") can start
+    /// from `from_turn_id`: the provider compacts locally, and the turn's user message is in the
+    /// model's history after the last whole-thread compaction.
+    pub async fn check_partial_compaction(&self, from_turn_id: &str) -> CodexResult<()> {
+        // Settings only: no skill discovery, no step.
+        let turn_context = self.session.new_inject_items_context().await;
+        crate::compact::ensure_partial_compaction_supported(turn_context.as_ref())?;
+        let history = self.session.clone_history().await;
+        crate::compact::partial_compaction_pivot(history.annotated_items(), from_turn_id)
+            .map(|_| ())
+    }
+
     /// Records a context fragment without creating a new user turn boundary.
     pub(crate) async fn inject_fragment_without_turn(&self, fragment: impl ContextualUserFragment) {
         let item = ContextualUserFragment::into(fragment);

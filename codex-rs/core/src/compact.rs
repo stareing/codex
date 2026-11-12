@@ -50,8 +50,13 @@ use codex_utils_output_truncation::truncate_text;
 use futures::prelude::*;
 use tracing::error;
 
+pub use codex_prompts::PARTIAL_SUMMARIZATION_PROMPT;
 pub use codex_prompts::SUMMARIZATION_PROMPT;
 pub use codex_prompts::SUMMARY_PREFIX;
+/// Why a partial compaction ("summarize from here") was refused: a turn is running. Shared by the
+/// app-server's up-front check and the session's check when the op is processed.
+pub const PARTIAL_COMPACTION_TURN_IN_PROGRESS: &str =
+    "a turn is in progress; summarize from a message once it has finished";
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
 
 /// Controls whether compaction replacement history must include initial context.
@@ -133,6 +138,7 @@ pub(crate) async fn run_inline_auto_compact_task(
         CompactionTrigger::Auto,
         reason,
         phase,
+        /*from_turn_id*/ None,
     )
     .await?;
     Ok(())
@@ -152,11 +158,140 @@ pub(crate) async fn run_compact_task(
         CompactionTrigger::Manual,
         CompactionReason::UserRequested,
         CompactionPhase::StandaloneTurn,
+        /*from_turn_id*/ None,
     )
     .await?;
     Ok(())
 }
 
+/// A partial compaction ("summarize from here", the counterpart of Claude Code's
+/// `partialCompactConversation(…, 'from')`): the model sees the whole history plus `input` (the
+/// partial summarization prompt) in one call without tools, then the history before the first user
+/// message of `from_turn_id` stays verbatim and that turn and every later one are replaced by the
+/// summary, followed by what was in use in the summarized part only.
+pub(crate) async fn run_partial_compact_task(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    input: Vec<UserInput>,
+    from_turn_id: String,
+) -> CodexResult<()> {
+    sess.emit_turn_started(&turn_context).await;
+    run_compact_task_inner(
+        sess.clone(),
+        turn_context,
+        input,
+        InitialContextInjection::DoNotInject,
+        CompactionTrigger::Manual,
+        CompactionReason::UserRequested,
+        CompactionPhase::StandaloneTurn,
+        Some(from_turn_id),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Index of the first user message of `from_turn_id` in `items`: where a partial compaction
+/// starts summarizing. Context items the turn recorded before its user message (settings
+/// updates) stay in the kept part.
+///
+/// Like Claude Code, which only offers messages after the last compact boundary, a turn before
+/// the last whole-thread compaction is refused: its user message survives there only as a copy
+/// kept next to that summary. A partial compaction's summary is no such boundary: the items before
+/// it are the verbatim history and can start another one.
+pub(crate) fn partial_compaction_pivot(
+    items: &[ResponseItemEnvelope],
+    from_turn_id: &str,
+) -> CodexResult<usize> {
+    let pivot = items.iter().position(|envelope| {
+        envelope.item.turn_id() == Some(from_turn_id)
+            && matches!(
+                crate::event_mapping::parse_turn_item(&envelope.item),
+                Some(TurnItem::UserMessage(user)) if !is_summary_message(&user.message())
+            )
+    });
+    let Some(pivot) = pivot else {
+        return Err(CodexErr::InvalidRequest(format!(
+            "fromTurnId '{from_turn_id}' is not in the model's context: no user message of that turn is in the history (an unknown turn, a turn already summarized, or a thread recorded before history items carried their turn)"
+        )));
+    };
+    let last_whole_compaction = items.iter().rposition(is_whole_compaction_boundary);
+    if last_whole_compaction.is_some_and(|boundary| boundary > pivot) {
+        return Err(CodexErr::InvalidRequest(format!(
+            "fromTurnId '{from_turn_id}' comes before the last compaction and is no longer in the active context; choose a more recent message"
+        )));
+    }
+    Ok(pivot)
+}
+
+/// A summary (or an opaque compaction item) that replaced the whole history before it.
+fn is_whole_compaction_boundary(envelope: &ResponseItemEnvelope) -> bool {
+    if matches!(
+        envelope.item,
+        ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. }
+    ) {
+        return true;
+    }
+    let is_partial = envelope
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.partial_compaction_summary);
+    !is_partial
+        && matches!(
+            crate::event_mapping::parse_turn_item(&envelope.item),
+            Some(TurnItem::UserMessage(user)) if is_summary_message(&user.message())
+        )
+}
+
+/// Partial compaction keeps a verbatim prefix, which only the local summary can do: remote
+/// compaction returns one opaque item for the whole input, and the token-budget compaction
+/// rewrites the whole history too. Refused rather than silently compacting the whole thread.
+pub(crate) fn ensure_partial_compaction_supported(turn_context: &TurnContext) -> CodexResult<()> {
+    if turn_context
+        .config
+        .features
+        .enabled(codex_features::Feature::TokenBudget)
+        || !matches!(
+            turn_context.provider.capabilities().remote_compaction,
+            codex_model_provider::RemoteCompactionSupport::Unsupported
+        )
+    {
+        return Err(CodexErr::InvalidRequest(
+            "summarizing from a message needs local compaction; this thread's provider compacts remotely".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// The history after a partial compaction: the kept prefix verbatim, then the summary (stamped
+/// with the compaction turn and marked partial).
+pub(crate) fn build_partial_compacted_history(
+    kept: &[ResponseItemEnvelope],
+    summary_text: &str,
+    compaction_turn_id: &str,
+) -> Vec<ResponseItemEnvelope> {
+    let mut history = kept.to_vec();
+    let mut summary = compaction_summary_item(summary_text);
+    summary.item.set_turn_id_if_missing(compaction_turn_id);
+    summary
+        .metadata
+        .get_or_insert_default()
+        .partial_compaction_summary = true;
+    history.push(summary);
+    history
+}
+
+fn compaction_summary_item(summary_text: &str) -> ResponseItemEnvelope {
+    let summary_text = if summary_text.is_empty() {
+        "(no summary available)".to_string()
+    } else {
+        summary_text.to_string()
+    };
+    ResponseItemEnvelope::new(ContextualUserFragment::into(CompactionSummary::new(
+        summary_text,
+    )))
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn run_compact_task_inner(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -165,6 +300,7 @@ async fn run_compact_task_inner(
     trigger: CompactionTrigger,
     reason: CompactionReason,
     phase: CompactionPhase,
+    from_turn_id: Option<String>,
 ) -> CodexResult<()> {
     let compaction_metadata =
         CompactionTurnMetadata::new(trigger, reason, CompactionImplementation::Responses, phase);
@@ -199,6 +335,7 @@ async fn run_compact_task_inner(
         input,
         initial_context_injection,
         compaction_metadata,
+        from_turn_id,
     )
     .await;
     let status = compaction_status_from_result(&result);
@@ -248,8 +385,16 @@ async fn run_compact_task_inner_impl(
     input: Vec<UserInput>,
     initial_context_injection: InitialContextInjection,
     compaction_metadata: CompactionTurnMetadata,
+    from_turn_id: Option<String>,
 ) -> CodexResult<String> {
-    let compaction = ContextCompactionItem::new();
+    // A pivot that is not (or no longer) in the history fails before the model is asked.
+    if let Some(from_turn_id) = from_turn_id.as_deref() {
+        partial_compaction_pivot(sess.clone_history().await.annotated_items(), from_turn_id)?;
+    }
+    let compaction = match from_turn_id.clone() {
+        Some(from_turn_id) => ContextCompactionItem::new().from_turn(from_turn_id),
+        None => ContextCompactionItem::new(),
+    };
     let compaction_item = TurnItem::ContextCompaction(compaction.clone());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
         .await;
@@ -364,6 +509,49 @@ async fn run_compact_task_inner_impl(
             .unwrap_or_default()
     };
     let summary_text = summary_message(&summary_suffix, compaction_metadata.phase());
+    if let Some(from_turn_id) = from_turn_id.as_deref() {
+        let pivot = partial_compaction_pivot(history_items, from_turn_id)?;
+        let mut new_history = build_partial_compacted_history(
+            &history_items[..pivot],
+            &summary_text,
+            &turn_context.sub_id,
+        );
+        // Only what was in use in the summarized part comes back: the kept part still holds the rest.
+        let mut restored = crate::compact_restore::restore(
+            sess.as_ref(),
+            history_items[pivot..].iter().map(|envelope| &envelope.item),
+            turn_context.model_context_window(),
+        )
+        .await;
+        restored.append_to(&mut new_history, &turn_context.sub_id);
+        let (window_number, window_ids) = sess.advance_auto_compact_window().await;
+        // The kept part already holds the initial context, so the reference context stays: the
+        // next turn sends a settings diff, not the whole initial context again.
+        let reference_context_item = sess.reference_context_item().await;
+        sess.replace_compacted_history(
+            new_history,
+            reference_context_item,
+            /*world_state_baseline*/ None,
+            CompactedHistoryMetadata {
+                message: summary_text,
+                window_number,
+                window_ids,
+                compaction_response_id: Some(compaction_response.response_id),
+                compaction_model_hash: turn_context.model_info().comp_hash.clone(),
+                reviewer_compaction_hash: None,
+            },
+        )
+        .await;
+        restored.mark_files_seen(sess.as_ref());
+        sess.recompute_token_usage(&turn_context).await;
+        sess.auto_compact_failures
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        let compaction_item =
+            TurnItem::ContextCompaction(compaction.with_summary(summary_suffix.clone()));
+        sess.emit_turn_item_completed(&turn_context, compaction_item)
+            .await;
+        return Ok(summary_suffix);
+    }
     let user_messages = collect_annotated_user_messages(history_items);
 
     let mut new_history = build_compacted_history(Vec::new(), &user_messages, &summary_text);
@@ -810,15 +998,7 @@ fn build_compacted_history_with_limit(
     }
     history.extend(selected_messages);
 
-    let summary_text = if summary_text.is_empty() {
-        "(no summary available)".to_string()
-    } else {
-        summary_text.to_string()
-    };
-
-    history.push(ResponseItemEnvelope::new(ContextualUserFragment::into(
-        CompactionSummary::new(summary_text),
-    )));
+    history.push(compaction_summary_item(summary_text));
 
     history
 }

@@ -187,6 +187,7 @@ async fn widget_reads_survive_history_modes_compaction_restarts_and_app_only_vis
                     .send_thread_compact_start_request(ThreadCompactStartParams {
                         thread_id: thread.id.clone(),
                         instructions: None,
+                        from_turn_id: None,
                     })
                     .await?;
                 let _: ThreadCompactStartResponse =

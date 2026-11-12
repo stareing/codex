@@ -763,3 +763,137 @@ fn an_overlong_compaction_drops_a_fifth_of_the_oldest_items() {
     assert_eq!(oldest_items_to_drop(500), 100);
     assert_eq!(oldest_items_to_drop(1), 0);
 }
+
+fn in_turn(mut item: ResponseItem, turn_id: &str) -> ResponseItemEnvelope {
+    item.set_turn_id_if_missing(turn_id);
+    ResponseItemEnvelope::new(item)
+}
+
+fn assistant_message(text: &str) -> ResponseItem {
+    ResponseItem::Message {
+        id: None,
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText {
+            text: text.to_string(),
+        }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    }
+}
+
+fn developer_message(text: &str) -> ResponseItem {
+    ResponseItem::Message {
+        id: None,
+        role: "developer".to_string(),
+        content: vec![ContentItem::InputText {
+            text: text.to_string(),
+        }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    }
+}
+
+/// turn-1: initial context, "one", answer; turn-2: "two", answer; turn-3: "three", answer.
+fn three_turns() -> Vec<ResponseItemEnvelope> {
+    vec![
+        in_turn(developer_message("initial context"), "turn-1"),
+        in_turn(user_message("one"), "turn-1"),
+        in_turn(assistant_message("answer one"), "turn-1"),
+        in_turn(developer_message("settings changed"), "turn-2"),
+        in_turn(user_message("two"), "turn-2"),
+        in_turn(assistant_message("answer two"), "turn-2"),
+        in_turn(user_message("three"), "turn-3"),
+        in_turn(assistant_message("answer three"), "turn-3"),
+    ]
+}
+
+#[test]
+fn partial_compaction_pivot_is_the_first_user_message_of_the_turn() {
+    let items = three_turns();
+    // The turn's context update before its user message stays in the kept part.
+    assert_eq!(partial_compaction_pivot(&items, "turn-2").unwrap(), 4);
+    // The first turn keeps its initial context.
+    assert_eq!(partial_compaction_pivot(&items, "turn-1").unwrap(), 1);
+    assert_eq!(partial_compaction_pivot(&items, "turn-3").unwrap(), 6);
+}
+
+#[test]
+fn partial_compaction_pivot_refuses_a_turn_not_in_the_history() {
+    let items = three_turns();
+    let err = partial_compaction_pivot(&items, "turn-9").unwrap_err();
+    assert!(
+        matches!(err.details(), CodexErrorDetails::InvalidRequest(message) if message.contains("turn-9")),
+        "{err}"
+    );
+    // History written before items carried their turn: nothing to anchor on, never the whole thread.
+    let untagged = annotated(vec![user_message("one"), assistant_message("answer")]);
+    assert!(partial_compaction_pivot(&untagged, "turn-1").is_err());
+}
+
+#[test]
+fn partial_compaction_pivot_refuses_a_turn_before_a_whole_compaction() {
+    // After a whole-thread compaction only copies of the user messages remain before the summary.
+    let items = vec![
+        in_turn(user_message("one"), "turn-1"),
+        in_turn(user_message("two"), "turn-2"),
+        in_turn(
+            compaction_summary_item(&summary_message("S", CompactionPhase::StandaloneTurn)).item,
+            "turn-c",
+        ),
+        in_turn(user_message("three"), "turn-3"),
+        in_turn(assistant_message("answer three"), "turn-3"),
+    ];
+    let err = partial_compaction_pivot(&items, "turn-2").unwrap_err();
+    assert!(
+        matches!(err.details(), CodexErrorDetails::InvalidRequest(message) if message.contains("before the last compaction")),
+        "{err}"
+    );
+    assert_eq!(partial_compaction_pivot(&items, "turn-3").unwrap(), 3);
+}
+
+#[test]
+fn a_partial_summary_does_not_hide_the_kept_turns_before_it() {
+    let items = three_turns();
+    let mut history = build_partial_compacted_history(
+        &items[..partial_compaction_pivot(&items, "turn-3").unwrap()],
+        &summary_message("recent", CompactionPhase::StandaloneTurn),
+        "turn-c",
+    );
+    history.push(in_turn(user_message("four"), "turn-4"));
+    // Turns kept verbatim before a partial summary can start another partial compaction.
+    assert_eq!(partial_compaction_pivot(&history, "turn-2").unwrap(), 4);
+    // The summarized turn is gone.
+    assert!(partial_compaction_pivot(&history, "turn-3").is_err());
+}
+
+#[test]
+fn partial_compaction_keeps_the_prefix_verbatim_and_puts_the_summary_after_it() {
+    let items = three_turns();
+    let pivot = partial_compaction_pivot(&items, "turn-2").unwrap();
+    let summary = summary_message(
+        "what turns two and three did",
+        CompactionPhase::StandaloneTurn,
+    );
+    let history = build_partial_compacted_history(&items[..pivot], &summary, "turn-c");
+
+    assert_eq!(&history[..pivot], &items[..pivot]);
+    assert_eq!(history.len(), pivot + 1);
+    let last = history.last().unwrap();
+    assert_eq!(last.item.turn_id(), Some("turn-c"));
+    assert!(last.metadata.as_ref().unwrap().partial_compaction_summary);
+    let Some(TurnItem::UserMessage(user)) = crate::event_mapping::parse_turn_item(&last.item)
+    else {
+        panic!("the summary is a user message: {last:?}");
+    };
+    assert_eq!(user.message(), summary);
+    assert!(!is_whole_compaction_boundary(last));
+}
+
+#[test]
+fn partial_summarization_prompt_scopes_the_summary_to_the_recent_part() {
+    assert!(PARTIAL_SUMMARIZATION_PROMPT.contains("<analysis>"));
+    assert!(PARTIAL_SUMMARIZATION_PROMPT.contains("<summary>"));
+    assert!(PARTIAL_SUMMARIZATION_PROMPT.contains("kept exactly as it is"));
+    assert!(PARTIAL_SUMMARIZATION_PROMPT.contains("do not call tools"));
+    assert_ne!(PARTIAL_SUMMARIZATION_PROMPT, SUMMARIZATION_PROMPT);
+}
