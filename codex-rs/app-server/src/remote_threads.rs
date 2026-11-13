@@ -126,6 +126,7 @@ const LISTED_METHODS: &[(&str, Rule)] = &[
     ("thread/read", Rule::Thread),
     ("thread/unsubscribe", Rule::Thread),
     ("thread/name/set", Rule::Thread),
+    ("thread/title/generate", Rule::Thread),
     ("thread/metadata/update", Rule::Thread),
     ("thread/compact/start", Rule::Thread),
     ("turn/start", Rule::Thread),

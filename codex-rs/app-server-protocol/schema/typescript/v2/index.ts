@@ -643,6 +643,8 @@ export type { ThreadStartedNotification } from "./ThreadStartedNotification";
 export type { ThreadStatus } from "./ThreadStatus";
 export type { ThreadStatusChangedNotification } from "./ThreadStatusChangedNotification";
 export type { ThreadTimelineEntry } from "./ThreadTimelineEntry";
+export type { ThreadTitleGenerateParams } from "./ThreadTitleGenerateParams";
+export type { ThreadTitleGenerateResponse } from "./ThreadTitleGenerateResponse";
 export type { ThreadTokenUsage } from "./ThreadTokenUsage";
 export type { ThreadTokenUsageUpdatedNotification } from "./ThreadTokenUsageUpdatedNotification";
 export type { ThreadTurnsListParams } from "./ThreadTurnsListParams";

@@ -2152,6 +2152,7 @@ dependencies = [
  "codex-skills-extension",
  "codex-state",
  "codex-thread-store",
+ "codex-thread-title",
  "codex-tools",
  "codex-uds",
  "codex-user-verification",
@@ -5098,6 +5099,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-thread-title"
+version = "0.0.0"
+dependencies = [
+ "codex-protocol",
+ "pretty_assertions",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "codex-tools"
 version = "0.0.0"
 dependencies = [
@@ -5172,6 +5184,7 @@ dependencies = [
  "codex-shell-command",
  "codex-state",
  "codex-terminal-detection",
+ "codex-thread-title",
  "codex-uds",
  "codex-utils-absolute-path",
  "codex-utils-approval-presets",

@@ -642,6 +642,13 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadSetNameResponse,
     },
+    /// Generate and save a name for an unnamed thread, as the TUI does after the first message.
+    ThreadTitleGenerate => "thread/title/generate" {
+        params: v2::ThreadTitleGenerateParams,
+        // Generation waits on a model turn; it must not block requests on its thread.
+        serialization: None,
+        response: v2::ThreadTitleGenerateResponse,
+    },
     #[experimental("thread/prediction/request")]
     ThreadPredictionRequest => "thread/prediction/request" {
         params: v2::ThreadPredictionRequestParams,

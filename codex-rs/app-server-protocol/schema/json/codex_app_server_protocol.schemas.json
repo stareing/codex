@@ -397,6 +397,31 @@
           "type": "object"
         },
         {
+          "description": "Generate and save a name for an unnamed thread, as the TUI does after the first message.",
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
+                "thread/title/generate"
+              ],
+              "title": "Thread/title/generateRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadTitleGenerateParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/title/generateRequest",
+          "type": "object"
+        },
+        {
           "properties": {
             "id": {
               "$ref": "#/definitions/v2/RequestId"
@@ -27402,6 +27427,41 @@
             "type": "object"
           }
         ]
+      },
+      "ThreadTitleGenerateParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Name an unnamed thread from its first user message with Codex's native title worker.",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "ThreadTitleGenerateParams",
+        "type": "object"
+      },
+      "ThreadTitleGenerateResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "generated": {
+            "description": "Whether `name` is a title the model generated during this call.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The thread's name after the call: an existing name, the generated title, or the first-message summary saved when generation failed. `null` when there was nothing to name the thread from.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "generated"
+        ],
+        "title": "ThreadTitleGenerateResponse",
+        "type": "object"
       },
       "ThreadTokenUsage": {
         "properties": {

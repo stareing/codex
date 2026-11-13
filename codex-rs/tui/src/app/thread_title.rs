@@ -22,25 +22,19 @@ use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::openai_models::ReasoningEffort;
-use pulldown_cmark::Event;
-use pulldown_cmark::Parser;
-use pulldown_cmark::TagEnd;
-use serde::Deserialize;
-use serde_json::Value;
-use serde_json::json;
+#[cfg(test)]
+pub(super) use codex_thread_title::THREAD_TITLE_MAX_CHARS;
+pub(super) use codex_thread_title::THREAD_TITLE_PROMPT_MAX_BYTES;
+use codex_thread_title::fallback_thread_title;
+pub(super) use codex_thread_title::parse_thread_title;
+pub(super) use codex_thread_title::recent_conversation_thread_title_prompt;
+pub(super) use codex_thread_title::thread_title_output_schema;
+pub(super) use codex_thread_title::thread_title_prompt;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-pub(super) const THREAD_TITLE_MAX_CHARS: usize = 36;
 const THREAD_TITLE_MODEL: &str = "gpt-5.6-luna";
-pub(super) const THREAD_TITLE_PROMPT_MAX_BYTES: usize = 960;
 const THREAD_TITLE_RECENT_MESSAGES: usize = 8;
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GeneratedThreadTitle {
-    title: String,
-}
 
 impl App {
     pub(super) fn finish_thread_title_generation(
@@ -282,78 +276,6 @@ impl App {
     }
 }
 
-/// Constrain generated metadata to one nonempty title within the display limit.
-pub(super) fn thread_title_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "title": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": THREAD_TITLE_MAX_CHARS,
-            },
-        },
-        "required": ["title"],
-        "additionalProperties": false,
-    })
-}
-
-fn thread_title_instructions() -> String {
-    format!(
-        "Generate a concise, single-line task title of at most \
-  {THREAD_TITLE_MAX_CHARS} characters and under five words where possible. \
-  Start with an imperative verb. Capitalize only the first word unless the \
-  user's language, proper nouns, acronyms, or code terms require otherwise. \
-  Preserve ticket references exactly. Write in the user's language. \
-  Do not use quotes, markdown, or trailing punctuation. \
-  Do not answer the request."
-    )
-}
-
-/// Desktop shows a single line from the first message until a generated title is available.
-fn fallback_thread_title(message: &str) -> Option<String> {
-    const MAX_CHARS: usize = 60;
-    const INPUT_CHAR_LIMIT: usize = 2_000;
-    let excerpt: String = message.trim().chars().take(INPUT_CHAR_LIMIT).collect();
-    let mut text = String::new();
-    for event in Parser::new(&excerpt) {
-        match event {
-            Event::Text(value) | Event::Code(value) => text.push_str(&value),
-            Event::SoftBreak
-            | Event::HardBreak
-            | Event::Rule
-            | Event::End(
-                TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item | TagEnd::CodeBlock,
-            ) => text.push(' '),
-            _ => {}
-        }
-    }
-    let mut title = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut chars = title.char_indices().skip(MAX_CHARS - 1);
-    if let Some((end, _)) = chars.next()
-        && chars.next().is_some()
-    {
-        title.truncate(title[..end].trim_end().len());
-        title.push('…');
-    }
-    (!title.is_empty()).then_some(title)
-}
-
-/// Build a bounded title request without truncating a Unicode character.
-pub(super) fn thread_title_prompt(user_message: &str) -> String {
-    let instructions = thread_title_instructions();
-    let prefix = format!("{instructions}\n\nUser prompt:\n");
-    let remaining_bytes = THREAD_TITLE_PROMPT_MAX_BYTES.saturating_sub(prefix.len());
-    let user_message = user_message
-        .trim()
-        .char_indices()
-        .take_while(|(index, character)| index + character.len_utf8() <= remaining_bytes)
-        .map(|(_, character)| character)
-        .collect::<String>();
-
-    format!("{prefix}{user_message}")
-}
-
 /// Format recent substantive messages chronologically without trusting their markup.
 pub(super) fn recent_conversation_messages<'a, I>(items: I) -> Option<String>
 where
@@ -439,52 +361,6 @@ where
         "<conversation>\n{}\n</conversation>",
         messages.join("\n")
     ))
-}
-
-/// Bound the entire suggestion prompt while preserving complete Unicode characters.
-pub(super) fn recent_conversation_thread_title_prompt(conversation: &str) -> String {
-    let instructions = thread_title_instructions();
-    let prefix = format!(
-        "{instructions}\n\
-Prioritize the current task and latest substantive user request.\n\n\
-Recent conversation messages:\n"
-    );
-    let conversation = conversation.trim();
-    let remaining_bytes = THREAD_TITLE_PROMPT_MAX_BYTES.saturating_sub(prefix.len());
-    let mut start = conversation.len().saturating_sub(remaining_bytes);
-    while !conversation.is_char_boundary(start) {
-        start += 1;
-    }
-    let conversation = &conversation[start..];
-
-    format!("{prefix}{conversation}")
-}
-
-/// Normalize a generated title and truncate it without splitting Unicode characters.
-pub(super) fn parse_thread_title(response: &str) -> Option<String> {
-    if !response.trim_start().starts_with('{') {
-        return None;
-    }
-
-    let title = serde_json::from_str::<GeneratedThreadTitle>(response)
-        .ok()?
-        .title;
-
-    let normalized = title
-        .trim()
-        .trim_matches(|character| matches!(character, '"' | '\'' | '`' | '“' | '”' | '‘' | '’'))
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim_end_matches(['.', '?', '!'])
-        .trim_end()
-        .to_string();
-
-    if normalized.is_empty() {
-        return None;
-    }
-
-    Some(normalized.chars().take(THREAD_TITLE_MAX_CHARS).collect())
 }
 
 #[cfg(test)]

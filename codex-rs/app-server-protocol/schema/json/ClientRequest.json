@@ -6042,6 +6042,18 @@
       ],
       "type": "string"
     },
+    "ThreadTitleGenerateParams": {
+      "description": "Name an unnamed thread from its first user message with Codex's native title worker.",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
     "ThreadTurnsListParams": {
       "properties": {
         "cursor": {
@@ -6842,6 +6854,31 @@
         "params"
       ],
       "title": "Thread/name/setRequest",
+      "type": "object"
+    },
+    {
+      "description": "Generate and save a name for an unnamed thread, as the TUI does after the first message.",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "thread/title/generate"
+          ],
+          "title": "Thread/title/generateRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadTitleGenerateParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Thread/title/generateRequest",
       "type": "object"
     },
     {

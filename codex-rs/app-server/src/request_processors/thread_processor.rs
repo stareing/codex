@@ -520,6 +520,7 @@ pub(crate) struct ThreadRequestProcessor {
     pub(super) log_db: Option<LogDbLayer>,
     pub(super) background_tasks: TaskTracker,
     pub(super) sample_responses: Arc<crate::thread_sample::SampleResponseRegistry>,
+    pub(super) thread_titles: Arc<super::thread_title::ThreadTitleWorkers>,
     pub(super) skills_watcher: Arc<SkillsWatcher>,
     pub(super) turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
     pub(super) initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
@@ -581,6 +582,7 @@ impl ThreadRequestProcessor {
             log_db,
             background_tasks: TaskTracker::new(),
             sample_responses,
+            thread_titles: Arc::default(),
             skills_watcher,
             turn_cost_worker,
             initial_config_warnings: Arc::new(initial_config_warnings),
@@ -1797,7 +1799,7 @@ impl ThreadRequestProcessor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_thread_config_overrides(
+    pub(super) fn build_thread_config_overrides(
         &self,
         model: Option<String>,
         model_provider: Option<String>,
@@ -1982,8 +1984,20 @@ impl ThreadRequestProcessor {
         let Some(name) = codex_core::util::normalize_thread_name(&name) else {
             return Err(invalid_request("thread name must not be empty"));
         };
-
         let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
+        // A manual name supersedes a pending generated title. Cancelling under the permit lets
+        // the title worker, which saves under the same permit, observe this name once cancelled.
+        self.thread_titles.cancel(thread_id);
+        let notification = self.write_thread_name(thread_id, name).await?;
+        Ok((ThreadSetNameResponse {}, Some(notification)))
+    }
+
+    /// Stores a normalized thread name; the caller holds the thread list state permit.
+    pub(super) async fn write_thread_name(
+        &self,
+        thread_id: ThreadId,
+        name: String,
+    ) -> Result<ThreadNameUpdatedNotification, JSONRPCErrorError> {
         self.thread_manager
             .update_thread_metadata(
                 thread_id,
@@ -1995,14 +2009,10 @@ impl ThreadRequestProcessor {
             )
             .await
             .map_err(|err| core_thread_write_error("set thread name", err))?;
-
-        Ok((
-            ThreadSetNameResponse {},
-            Some(ThreadNameUpdatedNotification {
-                thread_id: thread_id.to_string(),
-                thread_name: Some(name),
-            }),
-        ))
+        Ok(ThreadNameUpdatedNotification {
+            thread_id: thread_id.to_string(),
+            thread_name: Some(name),
+        })
     }
 
     async fn thread_memory_mode_set_response_inner(
@@ -3113,6 +3123,10 @@ impl ThreadRequestProcessor {
                 && thread
                     .thread_extension_data()
                     .get::<SampleThread>()
+                    .is_none()
+                && thread
+                    .thread_extension_data()
+                    .get::<super::thread_title::TitleThread>()
                     .is_none()
             {
                 data.push(thread_id.to_string());

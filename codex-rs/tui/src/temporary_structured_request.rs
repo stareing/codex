@@ -21,15 +21,14 @@ use codex_app_server_protocol::UserInput;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_READ_ONLY;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_thread_title::STRUCTURED_RESPONSE_MAX_BYTES;
+use codex_thread_title::STRUCTURED_TURN_TIMEOUT;
+use codex_thread_title::THREAD_TITLE_THREAD_SOURCE;
 use color_eyre::eyre::eyre;
 use serde_json::Value;
-use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
-const STRUCTURED_TURN_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 30);
-const STRUCTURED_RESPONSE_MAX_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TemporaryThreadKind {
@@ -64,7 +63,7 @@ pub(crate) async fn start_temporary_thread(
     } = options;
     let (source, permissions, approval_policy) = match kind {
         TemporaryThreadKind::Title => (
-            "thread_title",
+            THREAD_TITLE_THREAD_SOURCE,
             Some(BUILT_IN_PERMISSION_PROFILE_READ_ONLY.to_string()),
             Some(AskForApproval::Never),
         ),
@@ -74,41 +73,7 @@ pub(crate) async fn start_temporary_thread(
             None,
         ),
     };
-    let mut config = std::collections::HashMap::from([
-        ("features.apps".to_string(), false.into()),
-        ("features.code_mode".to_string(), false.into()),
-        ("features.code_mode_only".to_string(), false.into()),
-        ("features.context_management".to_string(), false.into()),
-        ("features.current_time_reminder".to_string(), false.into()),
-        ("features.deferred_executor".to_string(), false.into()),
-        ("features.enable_fanout".to_string(), false.into()),
-        ("features.goals".to_string(), false.into()),
-        ("features.hooks".to_string(), false.into()),
-        ("features.image_generation".to_string(), false.into()),
-        ("features.memories".to_string(), false.into()),
-        ("features.multi_agent".to_string(), false.into()),
-        ("features.multi_agent_v2".to_string(), false.into()),
-        ("features.plugins".to_string(), false.into()),
-        (
-            "features.request_permissions_tool".to_string(),
-            false.into(),
-        ),
-        ("features.shell_snapshot".to_string(), false.into()),
-        ("features.shell_tool".to_string(), false.into()),
-        ("features.standalone_web_search".to_string(), false.into()),
-        ("features.token_budget".to_string(), false.into()),
-        ("features.tool_suggest".to_string(), false.into()),
-        ("features.unified_exec".to_string(), false.into()),
-        ("features.view_image".to_string(), false.into()),
-        ("cloud.skills.enabled".to_string(), false.into()),
-        ("skills.include_instructions".to_string(), false.into()),
-        (
-            "tools.experimental_request_user_input.enabled".to_string(),
-            false.into(),
-        ),
-        ("tools.update_plan.enabled".to_string(), false.into()),
-        ("web_search".to_string(), "disabled".into()),
-    ]);
+    let mut config = codex_thread_title::hidden_thread_config_overrides();
     if permissions.is_none() {
         // Managed profiles take precedence over the legacy sandbox override below.
         config.insert(

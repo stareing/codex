@@ -830,6 +830,26 @@ pub struct ThreadUnarchiveParams {
 #[ts(export_to = "v2/")]
 pub struct ThreadSetNameResponse {}
 
+/// Name an unnamed thread from its first user message with Codex's native title worker.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadTitleGenerateParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadTitleGenerateResponse {
+    /// The thread's name after the call: an existing name, the generated title, or the
+    /// first-message summary saved when generation failed. `null` when there was nothing to name
+    /// the thread from.
+    pub name: Option<String>,
+    /// Whether `name` is a title the model generated during this call.
+    pub generated: bool,
+}
+
 v2_enum_from_core! {
     pub enum ThreadGoalStatus from CoreThreadGoalStatus {
         Active,
