@@ -5546,6 +5546,37 @@
           ],
           "title": "ExistingCallThreadRealtimeStartTransport",
           "type": "object"
+        },
+        {
+          "description": "No realtime upstream: `appendAudio` PCM is cut into utterances locally, transcribed by the model provider's audio endpoint and submitted as a normal user turn; the turn's assistant text is spoken sentence by sentence through the provider's speech endpoint and streamed as `thread/realtime/outputAudio/delta` (24 kHz mono 16-bit PCM). `model`, `prompt`, `initialItems` and the handoff options do not apply.",
+          "properties": {
+            "language": {
+              "description": "Transcription language hint such as `en` or `zh`; omitted = detected by the provider.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "cascade"
+              ],
+              "title": "CascadeThreadRealtimeStartTransportType",
+              "type": "string"
+            },
+            "voice": {
+              "description": "Voice id from `thread/realtime/listVoices` with `cascade: true`; omitted = the provider's default voice.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "CascadeThreadRealtimeStartTransport",
+          "type": "object"
         }
       ]
     },

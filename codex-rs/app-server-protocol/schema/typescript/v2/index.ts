@@ -590,6 +590,8 @@ export type { ThreadReadStateChangedNotification } from "./ThreadReadStateChange
 export type { ThreadReadStateOperation } from "./ThreadReadStateOperation";
 export type { ThreadRealtimeAudioChunk } from "./ThreadRealtimeAudioChunk";
 export type { ThreadRealtimeBemItemPresentation } from "./ThreadRealtimeBemItemPresentation";
+export type { ThreadRealtimeCascadeVoice } from "./ThreadRealtimeCascadeVoice";
+export type { ThreadRealtimeCascadeVoices } from "./ThreadRealtimeCascadeVoices";
 export type { ThreadRealtimeClosedNotification } from "./ThreadRealtimeClosedNotification";
 export type { ThreadRealtimeErrorNotification } from "./ThreadRealtimeErrorNotification";
 export type { ThreadRealtimeInitialItem } from "./ThreadRealtimeInitialItem";

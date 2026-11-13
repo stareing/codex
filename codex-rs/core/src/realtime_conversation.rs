@@ -186,6 +186,8 @@ impl RealtimeHandoffAdmission {
 
 pub(crate) struct RealtimeConversationManager {
     state: Mutex<RealtimeConversationManagerState>,
+    /// Cascade voice sessions (no realtime upstream), see `realtime_cascade`.
+    pub(crate) cascade: crate::realtime_cascade::CascadeManager,
 }
 
 struct RealtimeConversationManagerState {
@@ -611,6 +613,7 @@ impl RealtimeConversationManager {
                 mode_instructions: None,
                 context_active: false,
             }),
+            cascade: crate::realtime_cascade::CascadeManager::new(),
         }
     }
 
@@ -1377,6 +1380,7 @@ impl RealtimeConversationManager {
     }
 
     pub(crate) async fn shutdown(&self) -> CodexResult<()> {
+        self.cascade.stop().await;
         let state = {
             let mut guard = self.state.lock().await;
             guard.conversation.take()
@@ -1412,6 +1416,8 @@ pub(crate) async fn handle_start(
     sub_id: String,
     params: ConversationStartParams,
 ) -> CodexResult<()> {
+    // A realtime session replaces a cascade one.
+    crate::realtime_cascade::handle_close(sess).await;
     let prepared_start = match prepare_realtime_start(sess, params).await {
         Ok(prepared_start) => prepared_start,
         Err(err) => {
@@ -2088,6 +2094,9 @@ pub(crate) async fn handle_audio(
     sub_id: String,
     params: ConversationAudioParams,
 ) {
+    if crate::realtime_cascade::handle_audio(sess, &sub_id, &params.frame).await {
+        return;
+    }
     if let Err(err) = sess.conversation.audio_in(params.frame).await {
         error!("failed to append realtime audio: {err}");
         if sess.conversation.running_state().await.is_some() {
@@ -2221,6 +2230,9 @@ pub(crate) async fn handle_text(
     params: ConversationTextParams,
 ) {
     debug!(text = %params.text, "[realtime-text] appending realtime conversation text input");
+    if crate::realtime_cascade::handle_text(sess, &sub_id, &params.text, params.role).await {
+        return;
+    }
     if let Err(err) = sess.conversation.text_in(params).await {
         error!("failed to append realtime text: {err}");
         if sess.conversation.running_state().await.is_some() {
@@ -2238,6 +2250,9 @@ pub(crate) async fn handle_speech(
     params: ConversationSpeechParams,
 ) {
     debug!("[realtime-text] appending realtime speech");
+    if crate::realtime_cascade::handle_speech(sess, &sub_id, &params.text).await {
+        return;
+    }
     if let Err(err) = sess.conversation.append_speech(params.text).await {
         error!("failed to append realtime speech: {err}");
         if sess.conversation.running_state().await.is_some() {
@@ -2250,6 +2265,9 @@ pub(crate) async fn handle_speech(
 }
 
 pub(crate) async fn handle_close(sess: &Arc<Session>, sub_id: String) {
+    if crate::realtime_cascade::handle_close(sess).await {
+        return;
+    }
     handle_detach(sess, /*expected*/ None, &sub_id).await;
 }
 

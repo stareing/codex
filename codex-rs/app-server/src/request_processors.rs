@@ -254,6 +254,8 @@ use codex_app_server_protocol::ThreadRealtimeAppendSpeechParams;
 use codex_app_server_protocol::ThreadRealtimeAppendSpeechResponse;
 use codex_app_server_protocol::ThreadRealtimeAppendTextParams;
 use codex_app_server_protocol::ThreadRealtimeAppendTextResponse;
+use codex_app_server_protocol::ThreadRealtimeCascadeVoices;
+use codex_app_server_protocol::ThreadRealtimeListVoicesParams;
 use codex_app_server_protocol::ThreadRealtimeListVoicesResponse;
 use codex_app_server_protocol::ThreadRealtimeStartParams;
 use codex_app_server_protocol::ThreadRealtimeStartResponse;

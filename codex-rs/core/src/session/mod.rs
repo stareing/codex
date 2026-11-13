@@ -2904,6 +2904,7 @@ impl Session {
     }
 
     async fn maybe_mirror_event_text_to_realtime(&self, msg: &EventMsg) {
+        self.conversation.cascade.observe(msg).await;
         if self.conversation.running_state().await.is_none() {
             return;
         }

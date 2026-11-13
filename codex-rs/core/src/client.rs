@@ -1449,6 +1449,13 @@ impl ModelClient {
         HeaderValue::from_str(&routing_hint).ok()
     }
 
+    /// The configured provider's request setup, for side endpoints such as the cascade voice
+    /// routes (`realtime_cascade`).
+    pub(crate) async fn configured_provider_setup(&self) -> Result<CurrentClientSetup> {
+        self.current_client_setup(ClientRouting::ConfiguredProvider)
+            .await
+    }
+
     pub(crate) async fn prewarm_auth(&self) -> Result<()> {
         self.current_client_setup(ClientRouting::Workspace)
             .await

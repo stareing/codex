@@ -23,6 +23,9 @@ use codex_utils_path_uri::PathUri;
 use crate::image_url::REMOTE_IMAGE_URL_ERROR;
 use crate::image_url::is_remote_image_url;
 
+/// Upper bound on waiting for the core's cascade voice list (its own HTTP deadline is shorter).
+const CASCADE_VOICES_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 pub(super) fn validate_user_input_image_urls(
     input: &[V2UserInput],
 ) -> Result<(), JSONRPCErrorError> {
@@ -400,13 +403,57 @@ impl TurnRequestProcessor {
 
     pub(crate) async fn thread_realtime_list_voices(
         &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadRealtimeListVoicesParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let cascade = if params.cascade == Some(true) {
+            Some(
+                self.thread_realtime_cascade_voices(request_id, params.thread_id)
+                    .await?,
+            )
+        } else {
+            None
+        };
         Ok(Some(
             ThreadRealtimeListVoicesResponse {
                 voices: RealtimeVoicesList::builtin(),
+                cascade,
             }
             .into(),
         ))
+    }
+
+    /// The thread's model provider's speech voices (cascade transport).
+    async fn thread_realtime_cascade_voices(
+        &self,
+        request_id: &ConnectionRequestId,
+        thread_id: Option<String>,
+    ) -> Result<ThreadRealtimeCascadeVoices, JSONRPCErrorError> {
+        let Some(thread_id) = thread_id else {
+            return Err(invalid_request(
+                "cascade voices need threadId (its model provider is asked)".to_string(),
+            ));
+        };
+        let (_, thread) = self.load_thread(&thread_id).await?;
+        let (reply, outcome) = oneshot::channel();
+        self.submit_core_op(
+            request_id,
+            thread.as_ref(),
+            Op::RealtimeCascadeListVoices { reply },
+        )
+        .await
+        .map_err(|err| internal_error(format!("failed to list cascade voices: {err}")))?;
+        // The core answers within its own request deadline; this only guards a lost reply.
+        match tokio::time::timeout(CASCADE_VOICES_REPLY_TIMEOUT, outcome).await {
+            Ok(Ok(Ok(voices))) => Ok(voices.into()),
+            Ok(Ok(Err(err))) => Err(internal_error(err.to_string())),
+            Ok(Err(_)) => Err(internal_error(
+                "the thread closed before listing cascade voices".to_string(),
+            )),
+            Err(_) => Err(internal_error(
+                "listing cascade voices timed out".to_string(),
+            )),
+        }
     }
 
     pub(crate) async fn review_start(
@@ -1288,6 +1335,12 @@ impl TurnRequestProcessor {
         params: ThreadRealtimeStartParams,
         sideband_base_url: Option<String>,
     ) -> Result<Option<ThreadRealtimeStartResponse>, JSONRPCErrorError> {
+        if let Some(ThreadRealtimeStartTransport::Cascade { voice, language }) = &params.transport {
+            let (voice, language) = (voice.clone(), language.clone());
+            return self
+                .thread_realtime_cascade_start(request_id, params, voice, language)
+                .await;
+        }
         let attaches_existing_call = matches!(
             &params.transport,
             Some(ThreadRealtimeStartTransport::ExistingCall { .. })
@@ -1371,6 +1424,9 @@ impl TurnRequestProcessor {
                             sideband_base_url,
                         }
                     }
+                    ThreadRealtimeStartTransport::Cascade { .. } => {
+                        unreachable!("cascade starts return before the realtime transport mapping")
+                    }
                 }),
                 version: params.version,
                 voice: params.voice,
@@ -1378,6 +1434,59 @@ impl TurnRequestProcessor {
         )
         .await
         .map_err(|err| internal_error(format!("failed to start realtime conversation: {err}")))?;
+        Ok(Some(ThreadRealtimeStartResponse::default()))
+    }
+
+    /// `thread/realtime/start` with the cascade transport: no realtime upstream, the provider's
+    /// audio endpoints around normal turns (core `realtime_cascade`).
+    async fn thread_realtime_cascade_start(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadRealtimeStartParams,
+        voice: Option<String>,
+        language: Option<String>,
+    ) -> Result<Option<ThreadRealtimeStartResponse>, JSONRPCErrorError> {
+        let unsupported_option = if params.model.is_some() {
+            Some("model")
+        } else if params.prompt.is_some() {
+            Some("prompt")
+        } else if params
+            .initial_items
+            .as_ref()
+            .is_some_and(|items| !items.is_empty())
+        {
+            Some("initialItems")
+        } else if params.voice.is_some() {
+            Some("voice (use the transport's voice)")
+        } else if params.version.is_some() {
+            Some("version")
+        } else {
+            None
+        };
+        if let Some(option) = unsupported_option {
+            return Err(invalid_request(format!(
+                "cascade transport does not support {option}"
+            )));
+        }
+        let Some((_, thread)) = self
+            .prepare_realtime_conversation_thread(request_id, &params.thread_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        self.submit_core_op(
+            request_id,
+            thread.as_ref(),
+            Op::RealtimeCascadeStart(codex_protocol::realtime_cascade::CascadeStartParams {
+                voice,
+                language,
+                realtime_session_id: params.realtime_session_id,
+                speak: params.output_modality
+                    == codex_protocol::protocol::RealtimeOutputModality::Audio,
+            }),
+        )
+        .await
+        .map_err(|err| internal_error(format!("failed to start cascade voice session: {err}")))?;
         Ok(Some(ThreadRealtimeStartResponse::default()))
     }
 

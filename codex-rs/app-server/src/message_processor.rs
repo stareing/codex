@@ -1912,8 +1912,10 @@ impl MessageProcessor {
             ClientRequest::ThreadTimelineList { params, .. } => {
                 self.thread_processor.thread_timeline_list(params).await
             }
-            ClientRequest::ThreadRealtimeListVoices { params: _, .. } => {
-                self.turn_processor.thread_realtime_list_voices().await
+            ClientRequest::ThreadRealtimeListVoices { params, .. } => {
+                self.turn_processor
+                    .thread_realtime_list_voices(&request_id, params)
+                    .await
             }
             ClientRequest::ReviewStart { params, .. } => {
                 // Keep review setup from inflating the shared request dispatcher's stack frame.

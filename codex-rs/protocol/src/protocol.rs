@@ -775,6 +775,16 @@ pub enum Op {
     /// Request the list of voices supported by realtime conversation streams.
     RealtimeConversationListVoices,
 
+    /// Start a cascade voice session: local utterance detection, the provider's transcription
+    /// endpoint into normal user turns, and the provider's speech endpoint for the answers.
+    #[debug("RealtimeCascadeStart")]
+    RealtimeCascadeStart(crate::realtime_cascade::CascadeStartParams),
+
+    /// List the voices of the provider's speech endpoint for cascade sessions.
+    RealtimeCascadeListVoices {
+        reply: oneshot::Sender<CodexResult<crate::realtime_cascade::CascadeVoicesList>>,
+    },
+
     /// Submit turn input using the requested routing behavior.
     #[debug("TurnInput {{ requested_settings: {:?} }}", request.thread_settings)]
     TurnInput {
@@ -1150,6 +1160,8 @@ impl Op {
             Self::RealtimeConversationClose => "realtime_conversation_close",
             Self::RealtimeConversationDetach { .. } => "realtime_conversation_detach",
             Self::RealtimeConversationListVoices => "realtime_conversation_list_voices",
+            Self::RealtimeCascadeStart(_) => "realtime_cascade_start",
+            Self::RealtimeCascadeListVoices { .. } => "realtime_cascade_list_voices",
             Self::TurnInput { .. } => "turn_input",
             Self::RecoverTurn { .. } => "recover_turn",
             Self::SuspendTurnAndShutdown { .. } => "suspend_turn_and_shutdown",

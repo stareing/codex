@@ -1700,7 +1700,7 @@ async fn realtime_list_voices_returns_supported_names() -> Result<()> {
         .await?;
 
     let request_id = mcp
-        .send_thread_realtime_list_voices_request(ThreadRealtimeListVoicesParams {})
+        .send_thread_realtime_list_voices_request(ThreadRealtimeListVoicesParams::default())
         .await?;
     let response: ThreadRealtimeListVoicesResponse =
         timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
@@ -1736,6 +1736,7 @@ async fn realtime_list_voices_returns_supported_names() -> Result<()> {
                 default_v1: RealtimeVoice::Cove,
                 default_v2: RealtimeVoice::Marin,
             },
+            cascade: None,
         }
     );
 

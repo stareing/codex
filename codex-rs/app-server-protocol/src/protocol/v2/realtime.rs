@@ -296,6 +296,22 @@ pub enum ThreadRealtimeStartTransport {
         #[ts(rename = "callId")]
         call_id: String,
     },
+    /// No realtime upstream: `appendAudio` PCM is cut into utterances locally, transcribed by the
+    /// model provider's audio endpoint and submitted as a normal user turn; the turn's assistant
+    /// text is spoken sentence by sentence through the provider's speech endpoint and streamed as
+    /// `thread/realtime/outputAudio/delta` (24 kHz mono 16-bit PCM). `model`, `prompt`,
+    /// `initialItems` and the handoff options do not apply.
+    Cascade {
+        /// Voice id from `thread/realtime/listVoices` with `cascade: true`; omitted = the
+        /// provider's default voice.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        voice: Option<String>,
+        /// Transcription language hint such as `en` or `zh`; omitted = detected by the provider.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        language: Option<String>,
+    },
 }
 
 /// EXPERIMENTAL - response for starting thread realtime.
@@ -369,7 +385,16 @@ pub struct ThreadRealtimeStopResponse {}
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ThreadRealtimeListVoicesParams {}
+pub struct ThreadRealtimeListVoicesParams {
+    /// Also list the voices of the model provider's speech endpoint for the cascade transport.
+    /// Requires `threadId`, whose model provider is asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub cascade: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
+}
 
 /// EXPERIMENTAL - response for listing supported realtime voices.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -377,6 +402,46 @@ pub struct ThreadRealtimeListVoicesParams {}
 #[ts(export_to = "v2/")]
 pub struct ThreadRealtimeListVoicesResponse {
     pub voices: RealtimeVoicesList,
+    /// The provider's cascade voices; present only when `cascade` was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cascade: Option<ThreadRealtimeCascadeVoices>,
+}
+
+/// EXPERIMENTAL - voices of the model provider's speech endpoint (cascade transport).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimeCascadeVoices {
+    pub voices: Vec<ThreadRealtimeCascadeVoice>,
+    pub default_voice: Option<String>,
+}
+
+/// EXPERIMENTAL - one cascade voice.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimeCascadeVoice {
+    pub id: String,
+    pub label: Option<String>,
+    pub lang: Option<String>,
+}
+
+impl From<codex_protocol::realtime_cascade::CascadeVoicesList> for ThreadRealtimeCascadeVoices {
+    fn from(value: codex_protocol::realtime_cascade::CascadeVoicesList) -> Self {
+        Self {
+            voices: value
+                .voices
+                .into_iter()
+                .map(|voice| ThreadRealtimeCascadeVoice {
+                    id: voice.id,
+                    label: voice.label,
+                    lang: voice.lang,
+                })
+                .collect(),
+            default_voice: value.default_voice,
+        }
+    }
 }
 
 /// EXPERIMENTAL - emitted when thread realtime startup is accepted.

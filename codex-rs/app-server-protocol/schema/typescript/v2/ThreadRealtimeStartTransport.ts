@@ -14,4 +14,13 @@ sdp: string, } | { "type": "existingCall",
 /**
  * Identifier of a realtime call already created and negotiated by the client.
  */
-callId: string, };
+callId: string, } | { "type": "cascade",
+/**
+ * Voice id from `thread/realtime/listVoices` with `cascade: true`; omitted = the
+ * provider's default voice.
+ */
+voice?: string,
+/**
+ * Transcription language hint such as `en` or `zh`; omitted = detected by the provider.
+ */
+language?: string, };

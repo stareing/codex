@@ -667,6 +667,14 @@ pub(super) async fn submission_loop(
                     realtime_conversation_list_voices(&sess, sub.id.clone()).await;
                     false
                 }
+                Op::RealtimeCascadeStart(params) => {
+                    crate::realtime_cascade::handle_start(&sess, sub.id.clone(), params).await;
+                    false
+                }
+                Op::RealtimeCascadeListVoices { reply } => {
+                    crate::realtime_cascade::handle_list_voices(&sess, reply).await;
+                    false
+                }
                 Op::TurnInput {
                     request,
                     mode,

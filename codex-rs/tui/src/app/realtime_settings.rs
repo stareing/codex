@@ -188,7 +188,7 @@ impl App {
             .request_typed::<ThreadRealtimeListVoicesResponse>(
                 ClientRequest::ThreadRealtimeListVoices {
                     request_id: RequestId::String(format!("tui-voice-list-{}", Uuid::new_v4())),
-                    params: ThreadRealtimeListVoicesParams {},
+                    params: ThreadRealtimeListVoicesParams::default(),
                 },
             )
             .await?;
