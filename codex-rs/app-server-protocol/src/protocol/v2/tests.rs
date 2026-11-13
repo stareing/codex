@@ -2718,6 +2718,7 @@ fn mcp_server_elicitation_response_serializes_nullable_content() {
 fn mcp_server_status_serializes_absent_server_info_as_null() {
     let response = ListMcpServerStatusResponse {
         data: vec![McpServerStatus {
+            environment_id: None,
             tool_list_meta: None,
             server_capabilities: None,
             tools_error: None,
@@ -2739,6 +2740,7 @@ fn mcp_server_status_serializes_absent_server_info_as_null() {
         json!({
             "data": [{
                 "name": "not-ready",
+                "environmentId": null,
                 "runtimeStatus": null,
                 "pluginId": null,
                 "httpOrigin": null,
@@ -2771,6 +2773,7 @@ fn mcp_server_status_accepts_older_inventory_without_runtime_status() {
     assert_eq!(
         status,
         McpServerStatus {
+            environment_id: None,
             tool_list_meta: None,
             server_capabilities: None,
             tools_error: None,
@@ -2799,6 +2802,7 @@ fn mcp_server_status_updated_accepts_missing_thread_id() {
     let expected = McpServerStatusUpdatedNotification {
         thread_id: None,
         name: "optional_broken".to_string(),
+        environment_id: None,
         status: McpServerStartupState::Failed,
         error: Some("handshake failed".to_string()),
         failure_reason: None,
@@ -2809,6 +2813,7 @@ fn mcp_server_status_updated_accepts_missing_thread_id() {
         json!({
             "threadId": null,
             "name": "optional_broken",
+            "environmentId": null,
             "status": "failed",
             "error": "handshake failed",
             "failureReason": null,
@@ -2822,6 +2827,7 @@ fn mcp_server_status_updated_serializes_failure_reason() {
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
             thread_id: Some("thread-1".to_string()),
             name: "expired-oauth".to_string(),
+            environment_id: Some("remote".to_string()),
             status: McpServerStartupState::Failed,
             error: Some("OAuth credentials expired".to_string()),
             failure_reason: Some(McpServerStartupFailureReason::ReauthenticationRequired),
@@ -2834,6 +2840,7 @@ fn mcp_server_status_updated_serializes_failure_reason() {
             "params": {
                 "threadId": "thread-1",
                 "name": "expired-oauth",
+                "environmentId": "remote",
                 "status": "failed",
                 "error": "OAuth credentials expired",
                 "failureReason": "reauthenticationRequired",
@@ -2846,6 +2853,7 @@ fn mcp_server_status_updated_serializes_failure_reason() {
 fn mcp_server_status_serializes_absent_server_info_metadata_as_null() {
     let response = ListMcpServerStatusResponse {
         data: vec![McpServerStatus {
+            environment_id: None,
             tool_list_meta: None,
             server_capabilities: None,
             tools_error: None,
@@ -2874,6 +2882,7 @@ fn mcp_server_status_serializes_absent_server_info_metadata_as_null() {
         json!({
             "data": [{
                 "name": "initialized",
+                "environmentId": null,
                 "runtimeStatus": null,
                 "pluginId": "lookup@test",
                 "httpOrigin": null,
@@ -3738,6 +3747,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     let mcp_tool_call_item = TurnItem::McpToolCall(McpToolCallItem {
         id: "mcp-1".to_string(),
         server: "server".to_string(),
+        environment_id: Some("remote".to_string()),
         tool: "tool".to_string(),
         arguments: json!({"arg": "value"}),
         connector_id: Some("calendar".to_string()),
@@ -3759,6 +3769,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         ThreadItemPayload::McpToolCall {
             id: "mcp-1".to_string(),
             server: "server".to_string(),
+            environment_id: Some("remote".to_string()),
             tool: "tool".to_string(),
             status: McpToolCallStatus::InProgress,
             arguments: json!({"arg": "value"}),
@@ -3782,6 +3793,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     let completed_mcp_tool_call_item = TurnItem::McpToolCall(McpToolCallItem {
         id: "mcp-2".to_string(),
         server: "server".to_string(),
+        environment_id: None,
         tool: "tool".to_string(),
         arguments: JsonValue::Null,
         connector_id: None,
@@ -3808,6 +3820,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         ThreadItemPayload::McpToolCall {
             id: "mcp-2".to_string(),
             server: "server".to_string(),
+            environment_id: None,
             tool: "tool".to_string(),
             status: McpToolCallStatus::Completed,
             arguments: JsonValue::Null,
@@ -3845,6 +3858,7 @@ fn mcp_tool_call_app_context_serializes_connector_id() {
     let item = ThreadItemPayload::McpToolCall {
         id: "mcp-1".to_string(),
         server: "codex_apps".to_string(),
+        environment_id: None,
         tool: "calendar.create_event".to_string(),
         status: McpToolCallStatus::InProgress,
         arguments: json!({}),
@@ -3870,6 +3884,7 @@ fn mcp_tool_call_app_context_serializes_connector_id() {
             "type": "mcpToolCall",
             "id": "mcp-1",
             "server": "codex_apps",
+            "environmentId": null,
             "tool": "calendar.create_event",
             "status": "inProgress",
             "arguments": {},

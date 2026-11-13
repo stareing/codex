@@ -655,14 +655,6 @@ impl PermissionProfile {
         }
     }
 
-    pub fn from_legacy_sandbox_policy(sandbox_policy: &SandboxPolicy) -> Self {
-        Self::from_runtime_permissions_with_enforcement(
-            SandboxEnforcement::from_legacy_sandbox_policy(sandbox_policy),
-            &FileSystemSandboxPolicy::from(sandbox_policy),
-            NetworkSandboxPolicy::from(sandbox_policy),
-        )
-    }
-
     /// Decodes a portable legacy template without probing workspace metadata.
     pub fn from_legacy_sandbox_policy_template(sandbox_policy: &SandboxPolicy) -> Self {
         if let SandboxPolicy::WorkspaceWrite {
@@ -681,7 +673,11 @@ impl PermissionProfile {
                 NetworkSandboxPolicy::from(sandbox_policy),
             )
         } else {
-            Self::from_legacy_sandbox_policy(sandbox_policy)
+            Self::from_runtime_permissions_with_enforcement(
+                SandboxEnforcement::from_legacy_sandbox_policy(sandbox_policy),
+                &FileSystemSandboxPolicy::from(sandbox_policy),
+                NetworkSandboxPolicy::from(sandbox_policy),
+            )
         }
     }
 
@@ -2076,7 +2072,8 @@ pub fn local_image_content_items_with_label_number(
             ImageProcessingError::Read { .. }
             | ImageProcessingError::Encode { .. }
             | ImageProcessingError::InvalidDataUrl { .. }
-            | ImageProcessingError::ImageTooLarge { .. } => {
+            | ImageProcessingError::ImageTooLarge { .. }
+            | ImageProcessingError::ImageTooManyPixels { .. } => {
                 vec![local_media_error_placeholder(
                     path,
                     &err,
@@ -3138,24 +3135,26 @@ mod tests {
     }
 
     #[test]
-    fn permission_profile_presets_match_legacy_defaults() {
+    fn permission_profile_presets_match_legacy_defaults() -> Result<()> {
+        let cwd = tempdir()?;
         assert_eq!(
-            PermissionProfile::read_only(),
-            PermissionProfile::from_legacy_sandbox_policy(&SandboxPolicy::new_read_only_policy())
+            PermissionProfile::read_only().to_legacy_sandbox_policy(cwd.path())?,
+            SandboxPolicy::new_read_only_policy()
         );
         assert_eq!(
-            PermissionProfile::workspace_write(),
-            PermissionProfile::from_legacy_sandbox_policy(
-                &SandboxPolicy::new_workspace_write_policy()
-            )
+            PermissionProfile::workspace_write().to_legacy_sandbox_policy(cwd.path())?,
+            SandboxPolicy::new_workspace_write_policy()
         );
+        Ok(())
     }
 
     #[test]
     fn permission_profile_round_trip_preserves_disabled_sandbox() -> Result<()> {
         let cwd = tempdir()?;
-        let permission_profile =
-            PermissionProfile::from_legacy_sandbox_policy(&SandboxPolicy::DangerFullAccess);
+        let permission_profile = PermissionProfile::from_legacy_sandbox_policy_for_cwd(
+            &SandboxPolicy::DangerFullAccess,
+            cwd.path(),
+        );
 
         assert_eq!(permission_profile, PermissionProfile::Disabled);
         assert_eq!(
@@ -3237,7 +3236,8 @@ mod tests {
         let sandbox_policy = SandboxPolicy::ExternalSandbox {
             network_access: crate::protocol::NetworkAccess::Restricted,
         };
-        let permission_profile = PermissionProfile::from_legacy_sandbox_policy(&sandbox_policy);
+        let permission_profile =
+            PermissionProfile::from_legacy_sandbox_policy_for_cwd(&sandbox_policy, cwd.path());
 
         assert_eq!(
             permission_profile,

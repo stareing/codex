@@ -2799,6 +2799,13 @@ class McpServerOauthLoginParams(BaseModel):
             description="Registration strategy for this login only; omission selects automatic discovery.",
         ),
     ] = None
+    environment_id: Annotated[
+        str | None,
+        Field(
+            alias="environmentId",
+            description="Exact registration scope; omission preserves legacy name-only selection.",
+        ),
+    ] = None
     name: str
     scopes: list[str] | None = None
     thread_id: Annotated[str | None, Field(alias="threadId")] = None
@@ -2845,6 +2852,13 @@ class McpServerStatusUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    environment_id: Annotated[
+        str | None,
+        Field(
+            alias="environmentId",
+            description="Registration scope, not necessarily the server's execution environment.",
+        ),
+    ] = None
     error: str | None = None
     failure_reason: Annotated[
         McpServerStartupFailureReason | None, Field(alias="failureReason")
@@ -2860,6 +2874,13 @@ class McpServerToolCallParams(BaseModel):
     )
     field_meta: Annotated[Any | None, Field(alias="_meta")] = None
     arguments: Any | None = None
+    environment_id: Annotated[
+        str | None,
+        Field(
+            alias="environmentId",
+            description="Exact registration scope; omission preserves legacy name-only selection.",
+        ),
+    ] = None
     server: str
     thread_id: Annotated[str, Field(alias="threadId")]
     tool: str
@@ -5891,6 +5912,13 @@ class McpToolCallThreadItem(BaseModel):
         int | None,
         Field(alias="durationMs", description="The duration of the MCP tool call in milliseconds."),
     ] = None
+    environment_id: Annotated[
+        str | None,
+        Field(
+            alias="environmentId",
+            description="Registration scope, not necessarily the server's execution environment.",
+        ),
+    ] = None
     error: McpToolCallError | None = None
     id: str
     mcp_app_resource_uri: Annotated[
@@ -6495,6 +6523,23 @@ class ThreadRealtimeBemItemPresentation(
     ]
 
 
+class ThreadRealtimeCascadeVoice(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str
+    label: str | None = None
+    lang: str | None = None
+
+
+class ThreadRealtimeCascadeVoices(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    default_voice: Annotated[str | None, Field(alias="defaultVoice")] = None
+    voices: list[ThreadRealtimeCascadeVoice]
+
+
 class ThreadRealtimeClosedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6619,17 +6664,38 @@ class ExistingCallThreadRealtimeStartTransport(BaseModel):
     ]
 
 
+class CascadeThreadRealtimeStartTransport(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    language: Annotated[
+        str | None,
+        Field(
+            description="Transcription language hint such as `en` or `zh`; omitted = detected by the provider."
+        ),
+    ] = None
+    type: Annotated[Literal["cascade"], Field(title="CascadeThreadRealtimeStartTransportType")]
+    voice: Annotated[
+        str | None,
+        Field(
+            description="Voice id from `thread/realtime/listVoices` with `cascade: true`; omitted = the provider's default voice."
+        ),
+    ] = None
+
+
 class ThreadRealtimeStartTransport(
     RootModel[
         WebsocketThreadRealtimeStartTransport
         | WebrtcThreadRealtimeStartTransport
         | ExistingCallThreadRealtimeStartTransport
+        | CascadeThreadRealtimeStartTransport
     ]
 ):
     root: Annotated[
         WebsocketThreadRealtimeStartTransport
         | WebrtcThreadRealtimeStartTransport
-        | ExistingCallThreadRealtimeStartTransport,
+        | ExistingCallThreadRealtimeStartTransport
+        | CascadeThreadRealtimeStartTransport,
         Field(description="EXPERIMENTAL - transport used by thread realtime."),
     ]
 
@@ -6975,6 +7041,28 @@ class TurnStartedThreadTimelineEntry(BaseModel):
     started_at: int | None = None
     turn_id: str
     type: Annotated[Literal["turnStarted"], Field(title="TurnStartedThreadTimelineEntryType")]
+
+
+class ThreadTitleGenerateParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadTitleGenerateResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    generated: Annotated[
+        bool, Field(description="Whether `name` is a title the model generated during this call.")
+    ]
+    name: Annotated[
+        str | None,
+        Field(
+            description="The thread's name after the call: an existing name, the generated title, or the first-message summary saved when generation failed. `null` when there was nothing to name the thread from."
+        ),
+    ] = None
 
 
 class ThreadUnarchiveParams(BaseModel):
@@ -7729,6 +7817,17 @@ class ThreadNameSetRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/name/set"], Field(title="Thread/name/setRequestMethod")]
     params: ThreadSetNameParams
+
+
+class ThreadTitleGenerateRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/title/generate"], Field(title="Thread/title/generateRequestMethod")
+    ]
+    params: ThreadTitleGenerateParams
 
 
 class ThreadGoalGetRequest(BaseModel):
@@ -9496,6 +9595,13 @@ class ListMcpServerStatusParams(BaseModel):
             description="Controls how much MCP inventory data to fetch for each server. Defaults to `Full` when omitted."
         ),
     ] = None
+    environment_id: Annotated[
+        str | None,
+        Field(
+            alias="environmentId",
+            description="Select this environment's registration. Requires `serverName` and `threadId`. When omitted, a named request uses the same server as older clients.",
+        ),
+    ] = None
     limit: Annotated[
         int | None,
         Field(description="Optional page size; defaults to a server-defined value.", ge=0),
@@ -9555,6 +9661,13 @@ class McpResourceReadParams(BaseModel):
         ),
     ] = None
     connector_id: Annotated[str | None, Field(alias="connectorId")] = None
+    environment_id: Annotated[
+        str | None,
+        Field(
+            alias="environmentId",
+            description="Exact registration scope; omission preserves legacy name-only selection.",
+        ),
+    ] = None
     origin_call_id: Annotated[
         str | None,
         Field(
@@ -9590,6 +9703,13 @@ class McpServerStatus(BaseModel):
         populate_by_name=True,
     )
     auth_status: Annotated[McpAuthStatus, Field(alias="authStatus")]
+    environment_id: Annotated[
+        str | None,
+        Field(
+            alias="environmentId",
+            description="Environment that contributed this registration; null for a thread-wide server. Older servers omit this field.",
+        ),
+    ] = None
     http_origin: Annotated[
         str | None,
         Field(
@@ -13964,6 +14084,7 @@ class ClientRequest(
         | ThreadDeleteRequest
         | ThreadUnsubscribeRequest
         | ThreadNameSetRequest
+        | ThreadTitleGenerateRequest
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
         | ThreadGoalClearRequest
@@ -14077,6 +14198,7 @@ class ClientRequest(
         | ThreadDeleteRequest
         | ThreadUnsubscribeRequest
         | ThreadNameSetRequest
+        | ThreadTitleGenerateRequest
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
         | ThreadGoalClearRequest

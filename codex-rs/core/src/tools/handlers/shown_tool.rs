@@ -37,6 +37,8 @@ fn item(invocation: &ToolInvocation, tool: &str) -> McpToolCallItem {
         server: SHOWN_TOOL_SERVER.to_string(),
         tool: tool.to_string(),
         arguments,
+        // Built into the agent: not registered in any environment.
+        environment_id: None,
         connector_id: None,
         mcp_app_resource_uri: None,
         mcp_app_ui: None,

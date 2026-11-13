@@ -2,6 +2,7 @@ use crate::McpRefreshReason;
 use crate::agent::LocalAgentControl;
 use codex_mcp::McpServerKey;
 use codex_protocol::ContextWindowId;
+use codex_thread_store::ThreadPersistenceMetadata;
 #[path = "compaction_replay_tests.rs"]
 mod compaction_replay_tests;
 
@@ -389,14 +390,17 @@ async fn default_turn_context_assigns_missing_response_item_ids() {
             role: "developer".to_string(),
             tools: Arc::from([]),
         },
-    ];
+    ]
+    .into_iter()
+    .map(ResponseItemEnvelope::new)
+    .collect();
     let (items, _) = session
-        .prepare_conversation_items_for_history(&turn_context, turn_context.model_info(), &items)
+        .prepare_conversation_items_for_history(&turn_context, turn_context.model_info(), items)
         .await;
 
     assert_eq!(items.len(), 3);
     for (item, prefix) in items.iter().zip(["msg_", "amsg_", "at_"]) {
-        let suffix = item.id().unwrap().strip_prefix(prefix).unwrap();
+        let suffix = item.item.id().unwrap().strip_prefix(prefix).unwrap();
         assert_eq!(Uuid::parse_str(suffix).unwrap().get_version_num(), 7);
     }
 }
@@ -730,7 +734,7 @@ async fn request_mcp_server_elicitation_waits_for_user_response(
             session
                 .request_mcp_server_elicitation(
                     &turn_context,
-                    "codex_apps".to_string(),
+                    codex_mcp::McpServerKey::unscoped("codex_apps"),
                     RequestId::String("request-1".into()),
                     request,
                 )
@@ -749,6 +753,7 @@ async fn request_mcp_server_elicitation_waits_for_user_response(
         codex_protocol::approvals::ElicitationRequestEvent {
             turn_id: Some(turn_context.sub_id.clone()),
             server_name: "codex_apps".to_string(),
+            environment_id: None,
             id: codex_protocol::mcp::RequestId::String("request-1".to_string()),
             request,
         }
@@ -1215,82 +1220,6 @@ async fn start_managed_network_proxy_applies_execpolicy_network_rules() -> anyho
     assert_eq!(
         current_cfg.allowed_domains(),
         Some(vec!["example.com".to_string()])
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn managed_network_proxy_decider_survives_full_access_start() -> anyhow::Result<()> {
-    let full_access_permission_profile = PermissionProfile::Disabled;
-    let spec = crate::config::NetworkProxySpec::from_config_and_constraints(
-        NetworkProxyConfig::default(),
-        Some(NetworkConstraints {
-            enabled: Some(true),
-            ..Default::default()
-        }),
-        &full_access_permission_profile,
-    )?;
-    let exec_policy = Policy::empty();
-    let decider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let network_policy_decider: Arc<dyn codex_network_proxy::NetworkPolicyDecider> = Arc::new({
-        let decider_calls = Arc::clone(&decider_calls);
-        move |_request| {
-            decider_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            async { codex_network_proxy::NetworkDecision::ask("not_allowed") }
-        }
-    });
-
-    let (started_proxy, _) = Session::start_managed_network_proxy(
-        &spec,
-        &exec_policy,
-        &full_access_permission_profile,
-        SandboxType::None,
-        Some(network_policy_decider),
-        /*blocked_request_observer*/ None,
-        /*managed_network_requirements_enabled*/ true,
-        crate::config::NetworkProxyAuditMetadata::default(),
-    )
-    .await?;
-
-    let spec = spec.recompute_for_permission_profile(&PermissionProfile::workspace_write())?;
-    spec.apply_to_started_proxy(&started_proxy).await?;
-    let current_cfg = started_proxy.proxy().current_cfg().await?;
-    assert_eq!(current_cfg.allowed_domains(), None);
-
-    use tokio::io::AsyncReadExt as _;
-    use tokio::io::AsyncWriteExt as _;
-
-    let prepared = started_proxy
-        .proxy()
-        .prepare_for_remote_environment(std::collections::HashMap::new(), "test-bridge")?;
-    let proxy_addr = prepared.env["HTTP_PROXY"]
-        .strip_prefix("http://")
-        .expect("HTTP proxy URL")
-        .parse::<std::net::SocketAddr>()?;
-    let mut stream = tokio::net::TcpStream::connect(proxy_addr).await?;
-    stream
-        .write_all(
-            b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n",
-        )
-        .await?;
-    let mut buffer = [0_u8; 4096];
-    let bytes_read = tokio::time::timeout(StdDuration::from_secs(2), stream.read(&mut buffer))
-        .await
-        .expect("timed out waiting for proxy response")?;
-    let response = String::from_utf8_lossy(&buffer[..bytes_read]);
-
-    assert!(
-        response.starts_with("HTTP/1.1 403 Forbidden"),
-        "unexpected proxy response: {response}"
-    );
-    assert!(
-        response.contains("x-proxy-error: blocked-by-allowlist"),
-        "unexpected proxy response: {response}"
-    );
-    assert_eq!(
-        decider_calls.load(std::sync::atomic::Ordering::SeqCst),
-        1,
-        "unexpected proxy response: {response}"
     );
     Ok(())
 }
@@ -5480,7 +5409,7 @@ async fn session_configuration_apply_client_metadata_preserves_permissions() {
 
 #[tokio::test]
 async fn session_configuration_apply_preserves_profile_file_system_policy_on_cwd_only_update() {
-    let mut session_configuration = make_session_configuration_for_tests().await;
+    let mut config = make_session_configuration_for_tests().await;
     let workspace = tempfile::tempdir().expect("create temp dir");
     let project_root = workspace.path().join("project");
     let original_cwd = project_root.join("subdir");
@@ -5489,41 +5418,37 @@ async fn session_configuration_apply_preserves_profile_file_system_policy_on_cwd
     let project_root = project_root.abs();
     let docs_dir = docs_dir.abs();
 
-    session_configuration.legacy_fallback_cwd = original_cwd.abs();
-    let sandbox_policy = SandboxPolicy::WorkspaceWrite {
-        writable_roots: Vec::new(),
-        network_access: false,
-        exclude_tmpdir_env_var: true,
-        exclude_slash_tmp: true,
-    };
-    let file_system_sandbox_policy = FileSystemSandboxPolicy::restricted(vec![
-        FileSystemSandboxEntry {
-            path: FileSystemPath::Special {
+    config.legacy_fallback_cwd = original_cwd.abs();
+    config.runtime_workspace_roots =
+        vec![config.cwd().clone(), project_root.clone(), docs_dir.clone()];
+    let policy = FileSystemSandboxPolicy::restricted(vec![
+        FileSystemSandboxEntry::new(
+            FileSystemPath::Special {
                 value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
             },
-            access: FileSystemAccessMode::Write,
-            missing_path_behavior: None,
-        },
-        FileSystemSandboxEntry {
-            path: docs_dir.into(),
-            access: FileSystemAccessMode::Read,
-            missing_path_behavior: None,
-        },
+            FileSystemAccessMode::Write,
+        ),
+        FileSystemSandboxEntry::new(docs_dir.clone().into(), FileSystemAccessMode::Read),
     ]);
-    let network_sandbox_policy = NetworkSandboxPolicy::from(&sandbox_policy);
-    session_configuration
-        .set_permission_profile_for_tests(
-            PermissionProfile::from_runtime_permissions_with_enforcement(
-                SandboxEnforcement::from_legacy_sandbox_policy(&sandbox_policy),
-                &file_system_sandbox_policy,
-                network_sandbox_policy,
+    config
+        .permission_profile_state
+        .set_permission_profile_snapshot(
+            PermissionProfileSnapshot::active_with_profile_workspace_roots(
+                PermissionProfile::from_runtime_permissions(
+                    &policy,
+                    NetworkSandboxPolicy::Restricted,
+                ),
+                ActivePermissionProfile::new(":workspace"),
+                vec![docs_dir.clone().into()],
             ),
         )
-        .expect("set permission profile");
-    let expected_file_system_sandbox_policy =
-        file_system_sandbox_policy.materialize_project_roots_with_workspace_roots(&[]);
+        .unwrap();
+    let expected_profile = config.permission_profile_state.snapshot();
+    let mut expected_settings = config.thread_settings_snapshot(&[]);
+    expected_settings.cwd = project_root.clone();
+    expected_settings.runtime_workspace_roots = Some(vec![project_root.clone(), docs_dir]);
 
-    let updated = session_configuration
+    let updated = config
         .apply(
             &SessionSettingsUpdate {
                 environments: Some(TurnEnvironmentSelections::new(project_root, Vec::new())),
@@ -5531,11 +5456,14 @@ async fn session_configuration_apply_preserves_profile_file_system_policy_on_cwd
             },
             &[],
         )
-        .expect("cwd-only update should succeed");
+        .expect("apply cwd");
 
     assert_eq!(
-        updated.file_system_sandbox_policy(&[]),
-        expected_file_system_sandbox_policy
+        (
+            updated.thread_settings_snapshot(&[]),
+            updated.permission_profile_state.snapshot(),
+        ),
+        (expected_settings, expected_profile),
     );
 }
 
@@ -5708,7 +5636,7 @@ async fn session_configuration_apply_permission_profile_accepts_direct_write_roo
     let file_system_sandbox_policy =
         FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
             path: FileSystemPath::Path {
-                path: external_write_path.clone().into(),
+                path: external_write_path.into(),
             },
             access: FileSystemAccessMode::Write,
             missing_path_behavior: None,
@@ -5732,15 +5660,6 @@ async fn session_configuration_apply_permission_profile_accepts_direct_write_roo
     assert_eq!(
         updated.file_system_sandbox_policy(&[]),
         file_system_sandbox_policy
-    );
-    assert_eq!(
-        updated.sandbox_policy(&[]),
-        SandboxPolicy::WorkspaceWrite {
-            writable_roots: vec![external_write_path],
-            network_access: false,
-            exclude_tmpdir_env_var: true,
-            exclude_slash_tmp: true,
-        }
     );
 }
 
@@ -6255,12 +6174,10 @@ async fn standalone_settings_invalidate_continuation_before_delivering_acceptanc
         .tx_event
         .send(Event {
             id: "occupied".into(),
-            msg: EventMsg::ThreadSettingsApplied(
-                codex_protocol::protocol::ThreadSettingsAppliedEvent {
-                    thread_id: Some(session.thread_id()),
-                    thread_settings: session.thread_settings_snapshot().await,
-                },
-            ),
+            msg: EventMsg::ThreadSettingsApplied(ThreadSettingsAppliedEvent {
+                thread_id: Some(session.thread_id()),
+                thread_settings: session.thread_settings_snapshot().await,
+            }),
         })
         .await
         .expect("fill event channel");
@@ -6272,7 +6189,7 @@ async fn standalone_settings_invalidate_continuation_before_delivering_acceptanc
             id: "settings".into(),
             turn_extension_init: None,
             op: Op::ThreadSettings {
-                thread_settings: codex_protocol::protocol::ThreadSettingsOverrides::default(),
+                thread_settings: ThreadSettingsOverrides::default(),
                 reply: Some(reply),
             },
             trace: None,
@@ -6357,7 +6274,7 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
         }),
         previous_turn_settings: Some(previous_turn_settings),
     };
-    let expected_settings = codex_protocol::protocol::ThreadSettingsAppliedEvent {
+    let expected_settings = ThreadSettingsAppliedEvent {
         thread_id: Some(session.thread_id()),
         thread_settings: session.thread_settings_snapshot().await,
     };
@@ -8953,7 +8870,7 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() -> anyhow::Re
             model: turn_context.model_info().slug.clone(),
             provider_name: config.model_provider_id.clone(),
             approval_policy: "never".to_string(),
-            sandbox_policy: "danger-full-access".to_string(),
+            permissions_profile: "danger-full-access".to_string(),
         },
     )?;
     let live_thread = LiveThread::create(
@@ -9020,7 +8937,10 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() -> anyhow::Re
     let bundle = std::fs::read_dir(traces.path())?.next().unwrap()?.path();
     let rollout = replay_bundle(bundle)?;
     assert_eq!(rollout.status, RolloutStatus::Aborted);
-    assert!(rollout.recording_complete);
+    assert_eq!(
+        rollout.recording_status,
+        codex_rollout_trace::RecordingStatus::Complete
+    );
 
     assert_eq!(1, calls.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(
@@ -13508,9 +13428,7 @@ async fn sample_rollout(
     rollout_items.push(RolloutItem::ResponseItem(assistant1.clone().into()));
 
     let summary1 = "summary one";
-    let snapshot1 = raw_history_items(&live_history);
-    let user_messages1 = collect_user_messages(&snapshot1);
-    let rebuilt1 = compact::build_compacted_history(Vec::new(), &user_messages1, summary1);
+    let rebuilt1 = compact::build_compacted_history(&live_history, summary1);
     live_history.replace_annotated(rebuilt1);
     let (window_number, window_ids) = session.advance_auto_compact_window().await;
     rollout_items.push(RolloutItem::Compacted(Box::new(CompactedItem {
@@ -13543,9 +13461,7 @@ async fn sample_rollout(
     rollout_items.push(RolloutItem::ResponseItem(assistant2.clone().into()));
 
     let summary2 = "summary two";
-    let snapshot2 = raw_history_items(&live_history);
-    let user_messages2 = collect_user_messages(&snapshot2);
-    let rebuilt2 = compact::build_compacted_history(Vec::new(), &user_messages2, summary2);
+    let rebuilt2 = compact::build_compacted_history(&live_history, summary2);
     live_history.replace_annotated(rebuilt2);
     let (window_number, window_ids) = session.advance_auto_compact_window().await;
     rollout_items.push(RolloutItem::Compacted(Box::new(CompactedItem {

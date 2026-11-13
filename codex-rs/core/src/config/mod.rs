@@ -54,6 +54,7 @@ use codex_config::types::OAuthCredentialsStoreMode;
 use codex_config::types::QuickDial;
 use codex_config::types::ResumeCwdMode;
 use codex_config::types::SessionPickerViewMode;
+use codex_config::types::StatusLineSelection;
 use codex_config::types::ToolSuggestConfig;
 use codex_config::types::ToolSuggestDisabledTool;
 use codex_config::types::ToolSuggestDiscoverable;
@@ -781,6 +782,8 @@ pub struct Config {
     pub guardian_transcript_mode: codex_protocol::TranscriptFormat,
     /// Frozen section policy for sync Guardian; absence keeps fixed budgeting.
     pub guardian_sync_elastic_budget: Option<codex_guardian_context::ElasticBudgetConfig>,
+    /// Frozen section policy for async Guardian; absence keeps fixed budgeting.
+    pub guardian_async_elastic_budget: Option<codex_guardian_context::ElasticBudgetConfig>,
 
     /// Optional replacement for the gated history-retrieval instructions.
     /// Blank config values are treated as unset, like other Guardian policy overrides.
@@ -911,6 +914,9 @@ pub struct Config {
     ///
     /// When unset, the TUI defaults to: `model-with-reasoning` and `current-dir`.
     pub tui_status_line: Option<Vec<String>>,
+
+    /// Local choice of built-in status items or an MCP provider.
+    pub tui_status_line_provider: Option<Box<StatusLineSelection>>,
 
     /// Whether to color status line items with colors from the active syntax theme.
     pub tui_status_line_use_colors: bool,
@@ -1717,6 +1723,21 @@ async fn config_toml_from_layers(layers: &ConfigLayerStack) -> std::io::Result<C
 }
 
 impl Config {
+    pub(crate) fn thread_persistence_metadata(
+        &self,
+    ) -> codex_thread_store::ThreadPersistenceMetadata {
+        use codex_protocol::protocol::ThreadMemoryMode;
+        codex_thread_store::ThreadPersistenceMetadata {
+            cwd: Some(self.cwd.to_path_buf()),
+            model_provider: self.model_provider_id.clone(),
+            memory_mode: if self.memories.generate_memories {
+                ThreadMemoryMode::Enabled
+            } else {
+                ThreadMemoryMode::Disabled
+            },
+        }
+    }
+
     /// Capture storage and sync preparation use one session-static rollout choice.
     pub(crate) fn guardian_context_budgeting(&self) -> codex_guardian_context::ContextBudgeting {
         if self.guardian_sync_elastic_budget.is_some() {
@@ -4317,21 +4338,18 @@ impl Config {
                 FeatureToml::Enabled(_) => None,
             })
             .unwrap_or_default();
-        let guardian_sync_elastic_budget = cfg.features.as_ref()
-            .and_then(|features| features.guardianv2.as_ref())
-            .and_then(|feature| match feature {
-                FeatureToml::Config(guardian) if guardian.sync_elastic_budgeting == Some(true) => Some(guardian),
-                FeatureToml::Config(_) | FeatureToml::Enabled(_) => None,
-            })
-            .map(|guardian| {
-                let sections = guardian.sync_elastic_sections.as_ref().filter(|sections| !sections.is_empty())
+        let resolve_elastic_budget = |named_sections: Option<&BTreeMap<String, codex_features::GuardianElasticSectionConfigToml>>, prefix: &str| {
+                let sections = named_sections.filter(|sections| !sections.is_empty())
                     .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData,
-                        "sync_elastic_sections is required when sync_elastic_budgeting is enabled"))?;
+                        format!("{prefix}_elastic_sections is required when {prefix}_elastic_budgeting is enabled")))?;
                 let mut policy = codex_guardian_context::ElasticBudgetConfig::default();
                 for (name, limits) in sections {
                     let section = codex_guardian_context::ElasticSection::deserialize(name.as_str().into_deserializer())
                         .map_err(|error: serde::de::value::Error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
                     if section == codex_guardian_context::ElasticSection::TranscriptSelectedExecResults {
+                        if prefix == "async" {
+                            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "transcript_selected_exec_results is only supported for sync elastic budgeting"));
+                        }
                         if limits.nested_tool_names.is_empty() || limits.nested_tool_names.iter().any(|name| name.trim().is_empty()) {
                             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
                                 "transcript_selected_exec_results requires nonempty nested_tool_names"));
@@ -4351,12 +4369,26 @@ impl Config {
                     }
                     if policy.sections.insert(section, section_limits).is_some() {
                         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
-                            format!("duplicate sync_elastic_sections section: {name}")));
+                            format!("duplicate {prefix}_elastic_sections section: {name}")));
                     }
                 }
                 policy.validate().map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
                 Ok::<_, std::io::Error>(policy)
-            }).transpose()?;
+            };
+        let guardian = cfg.features.as_ref()
+            .and_then(|features| features.guardianv2.as_ref())
+            .and_then(|feature| match feature {
+                FeatureToml::Config(guardian) => Some(guardian),
+                FeatureToml::Enabled(_) => None,
+            });
+        let guardian_sync_elastic_budget = guardian
+            .filter(|guardian| guardian.sync_elastic_budgeting == Some(true))
+            .map(|guardian| resolve_elastic_budget(guardian.sync_elastic_sections.as_ref(), "sync"))
+            .transpose()?;
+        let guardian_async_elastic_budget = guardian
+            .filter(|guardian| guardian.async_elastic_budgeting == Some(true))
+            .map(|guardian| resolve_elastic_budget(guardian.async_elastic_sections.as_ref(), "async"))
+            .transpose()?;
         let guardian_conversation_history_prompt = cfg.auto_review.as_ref().and_then(|auto_review| {
             normalize_guardian_policy_config(
                 auto_review.experimental_conversation_history_prompt.as_deref(),
@@ -4737,6 +4769,7 @@ impl Config {
             guardian_policy_template: None,
             guardian_transcript_mode,
             guardian_sync_elastic_budget,
+            guardian_async_elastic_budget,
             guardian_conversation_history_prompt,
             guardian_conversation_history_max_output_tokens,
             guardian_review_timeout: cfg
@@ -4887,6 +4920,7 @@ impl Config {
                 .map(|t| t.alternate_screen)
                 .unwrap_or_default(),
             tui_status_line: cfg.tui.as_ref().and_then(|t| t.status_line.clone()),
+            tui_status_line_provider: cfg.tui.as_ref().and_then(|t| t.status_line_provider.clone()),
             tui_status_line_use_colors: cfg
                 .tui
                 .as_ref()

@@ -4398,6 +4398,13 @@
         }
       ],
       "properties": {
+        "environmentId": {
+          "description": "Registration scope, not necessarily the server's execution environment.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "serverName": {
           "type": "string"
         },
@@ -15165,6 +15172,13 @@
             ],
             "description": "Controls how much MCP inventory data to fetch for each server. Defaults to `Full` when omitted."
           },
+          "environmentId": {
+            "description": "Select this environment's registration. Requires `serverName` and `threadId`. When omitted, a named request uses the same server as older clients.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "limit": {
             "description": "Optional page size; defaults to a server-defined value.",
             "format": "uint32",
@@ -15904,6 +15918,13 @@
               "null"
             ]
           },
+          "environmentId": {
+            "description": "Exact registration scope; omission preserves legacy name-only selection.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "originCallId": {
             "description": "Originating MCP tool call used to select the resource's app.",
             "type": [
@@ -16136,6 +16157,13 @@
             ],
             "description": "Registration strategy for this login only; omission selects automatic discovery."
           },
+          "environmentId": {
+            "description": "Exact registration scope; omission preserves legacy name-only selection.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -16213,6 +16241,13 @@
         "properties": {
           "authStatus": {
             "$ref": "#/definitions/v2/McpAuthStatus"
+          },
+          "environmentId": {
+            "description": "Environment that contributed this registration; null for a thread-wide server. Older servers omit this field.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "httpOrigin": {
             "description": "HTTP origin of the effective configured endpoint, including plugin servers. Excludes credentials, path, query, and fragment; null for non-HTTP transports.",
@@ -16302,6 +16337,13 @@
       "McpServerStatusUpdatedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
+          "environmentId": {
+            "description": "Registration scope, not necessarily the server's execution environment.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "error": {
             "type": [
               "string",
@@ -16343,6 +16385,13 @@
         "properties": {
           "_meta": true,
           "arguments": true,
+          "environmentId": {
+            "description": "Exact registration scope; omission preserves legacy name-only selection.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "server": {
             "type": "string"
           },
@@ -24418,6 +24467,13 @@
                 "format": "int64",
                 "type": [
                   "integer",
+                  "null"
+                ]
+              },
+              "environmentId": {
+                "description": "Registration scope, not necessarily the server's execution environment.",
+                "type": [
+                  "string",
                   "null"
                 ]
               },

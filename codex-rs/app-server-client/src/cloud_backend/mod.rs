@@ -147,9 +147,11 @@ impl Replies {
         // A server can close Attach immediately after returning successful headers.
         // A healthy idle stream needs no event to prove that it is ready.
         let first_event = match tokio::task::unconstrained(stream.next()).now_or_never() {
-            Some(None | Some(Err(_))) => bail!(
-                "Cloud conversation activated but its stream did not connect. Reopen it before sending."
-            ),
+            Some(None | Some(Err(_))) => {
+                bail!(
+                    "Cloud conversation activated but its stream did not connect. Reopen it before sending."
+                );
+            }
             Some(Some(Ok(event))) => Some(event),
             None => None,
         };
@@ -275,7 +277,7 @@ async fn run_worker(
     output: &mpsc::UnboundedSender<AppServerEvent>,
 ) {
     loop {
-        let command = tokio::select! {
+        let mut command = tokio::select! {
             _ = output.closed() => return,
             () = replies.forward_next(output) => continue,
             command = commands.recv() => match command { Some(command) => command, None => return },
@@ -333,10 +335,18 @@ async fn run_worker(
             )),
         };
         let result = match request {
-            Ok((request, mode, project)) => tokio::select! {
-                _ = output.closed() => return,
-                result = handle_request(request, mode, project, requests, replies, output) => result,
-            },
+            Ok((request, mode, project)) => {
+                // Inventory is a read with no conversation state to commit.
+                let is_thread_list = matches!(&request, protocol::ClientRequest::ThreadList { .. });
+                if is_thread_list && command.response.is_closed() {
+                    continue;
+                }
+                tokio::select! {
+                    _ = output.closed() => return,
+                    _ = command.response.closed(), if is_thread_list => continue,
+                    result = handle_request(request, mode, project, requests, replies, output) => result,
+                }
+            }
             Err(error) => Err(error),
         };
         if result.is_err()

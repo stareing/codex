@@ -1,12 +1,9 @@
 use crate::client::ModelClient;
-use crate::client::X_CODEX_TURN_METADATA_HEADER;
 use crate::context::ContextualUserFragment;
 use crate::context::RealtimeDelegation;
 use crate::context::RealtimeDelegationSource;
 use crate::realtime_context::build_realtime_startup_context;
 use crate::realtime_context::truncate_realtime_text_to_token_budget;
-use crate::realtime_prompt::prepare_realtime_backend_prompt;
-use crate::responses_metadata::THREAD_SOURCE_KEY;
 use crate::session::session::Session;
 use anyhow::Context;
 use async_channel::Receiver;
@@ -27,7 +24,7 @@ use codex_api::RealtimeWebsocketClient;
 use codex_api::RealtimeWebsocketConnection;
 use codex_api::RealtimeWebsocketEvents;
 use codex_api::RealtimeWebsocketWriter;
-use codex_api::build_session_headers;
+use codex_api::build_realtime_thread_headers;
 use codex_api::map_api_error;
 use codex_async_utils::OrCancelExt;
 use codex_config::config_toml::RealtimeWsMode;
@@ -41,6 +38,7 @@ use codex_login::default_client::default_headers;
 use codex_login::read_openai_api_key_from_env;
 use codex_model_provider::resolve_api_provider;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_prompts::prepare_realtime_backend_prompt;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -69,7 +67,6 @@ use codex_protocol::protocol::RealtimeVoicesList;
 use codex_utils_output_truncation::approx_bytes_for_tokens;
 use codex_utils_string::approx_token_count;
 use codex_utils_string::take_bytes_at_char_boundary;
-use codex_utils_string::to_ascii_json_string;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::AUTHORIZATION;
@@ -106,7 +103,6 @@ const AUDIO_IN_QUEUE_CAPACITY: usize = 256;
 const TEXT_IN_QUEUE_CAPACITY: usize = 64;
 const HANDOFF_OUT_QUEUE_CAPACITY: usize = 64;
 const OUTPUT_EVENTS_QUEUE_CAPACITY: usize = 256;
-const REALTIME_THREAD_SOURCE_MAX_BYTES: usize = 256;
 const REALTIME_STARTUP_CONTEXT_TOKEN_BUDGET: usize = 5_300;
 const REALTIME_ASSISTANT_OUTPUT_TOKEN_BUDGET: usize = 1_000;
 const REALTIME_REASONING_STATUS_MAX_BYTES: usize = 256;
@@ -118,7 +114,7 @@ const HANDOFF_STREAM_TRUNCATION_MARKER: &str = "\n…output truncated…\n";
 const AGENT_FINAL_MESSAGE_PREFIX: &str = "\"Agent Final Message\":\n\n";
 const STANDALONE_HANDOFF_ID: &str = "codex";
 const DEFAULT_REALTIME_MODEL: &str = "gpt-realtime-1.5";
-const DEFAULT_FRAMELESS_REALTIME_MODEL: &str = "gpt-live-1-codex";
+const DEFAULT_FRAMELESS_REALTIME_MODEL: &str = "gpt-live-1.1-codex";
 pub(crate) const REALTIME_USER_TEXT_PREFIX: &str = "[USER] ";
 pub(crate) const REALTIME_BACKEND_TEXT_PREFIX: &str = "[BACKEND] ";
 const REALTIME_V2_HANDOFF_COMPLETE_ACKNOWLEDGEMENT: &str =
@@ -373,14 +369,14 @@ impl RealtimeStreamedItem {
             if self.buffered_text.is_empty() {
                 return None;
             }
-            let text = self.buffered_text.drain(..).collect::<String>();
+            let text = std::mem::take(&mut self.buffered_text);
             let text = format!("{prefix}{text}");
             self.sent_bytes += text.len();
             return Some(text);
         }
 
-        let head = self.buffered_text.drain(..).collect::<String>();
-        let tail = self.tail_text.drain(..).collect::<String>();
+        let head = std::mem::take(&mut self.buffered_text);
+        let tail = std::mem::take(&mut self.tail_text);
         let text = format!("{prefix}{head}{HANDOFF_STREAM_TRUNCATION_MARKER}{tail}");
         self.sent_bytes += text.len();
         Some(text)
@@ -1654,18 +1650,11 @@ async fn prepare_realtime_start(
         }
     }
     .unwrap_or_default();
-    extra_headers.extend(build_session_headers(
-        Some(sess.session_id().to_string()),
-        Some(sess.thread_id().to_string()),
+    extra_headers.extend(build_realtime_thread_headers(
+        sess.session_id().to_string(),
+        sess.thread_id().to_string(),
+        sess.thread_config_snapshot().await.thread_source,
     ));
-    // Voice calls can span zero or many backing turns; send only the saved thread source.
-    if let Some(thread_source) = sess.thread_config_snapshot().await.thread_source
-        && thread_source.as_str().len() <= REALTIME_THREAD_SOURCE_MAX_BYTES
-        && let Ok(metadata) = to_ascii_json_string(&json!({ THREAD_SOURCE_KEY: thread_source }))
-        && let Ok(metadata) = HeaderValue::from_str(&metadata)
-    {
-        extra_headers.insert(X_CODEX_TURN_METADATA_HEADER, metadata);
-    }
     Ok(PreparedRealtimeConversationStart {
         attachment_control: RealtimeAttachmentControl::default(),
         sideband: None,
@@ -1812,11 +1801,10 @@ pub(crate) async fn build_realtime_session_config(
         ConfiguredRealtimeVoice::Use => config.realtime.voice,
         ConfiguredRealtimeVoice::Ignore => None,
     };
-    let voice = params
-        .voice
-        .or(config_voice)
-        .unwrap_or_else(|| default_realtime_voice(version));
-    validate_realtime_voice(version, voice)?;
+    let voice = params.voice.unwrap_or(config_voice);
+    if let Some(voice) = voice {
+        validate_realtime_voice(version, voice)?;
+    }
     Ok(RealtimeSessionConfig {
         instructions: prompt,
         initial_items: params.initial_items.clone(),
@@ -1833,14 +1821,6 @@ pub(crate) async fn build_realtime_session_config(
         output_modality: params.output_modality,
         voice,
     })
-}
-
-fn default_realtime_voice(version: RealtimeWsVersion) -> RealtimeVoice {
-    let voices = RealtimeVoicesList::builtin();
-    match version {
-        RealtimeWsVersion::V1 | RealtimeWsVersion::V3 => voices.default_v1,
-        RealtimeWsVersion::V2 => voices.default_v2,
-    }
 }
 
 fn prefix_realtime_text(text: String, prefix: &str, session_kind: RealtimeSessionKind) -> String {

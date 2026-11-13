@@ -46,6 +46,8 @@ use codex_protocol::protocol::TurnContextItem;
 use codex_protocol::protocol::WorldStateItem;
 use codex_protocol::realtime::RealtimeItem;
 use codex_protocol::security_risk::SecurityRiskScore;
+use codex_protocol::turn_input::InjectedResponseItem;
+use codex_protocol::turn_input::ItemRetention;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -75,6 +77,10 @@ pub struct CodexHarnessMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sampled_through_sequence: Option<u64>,
 
+    /// Original inline images to sanitize again on resume or fork.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub image_replay_sources: Vec<ImageReplaySource>,
+
     /// Complete retained records actually delivered by this Guardian message. Host-only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub guardian_sources: Vec<RetainedSource>,
@@ -100,8 +106,16 @@ pub struct CodexHarnessMetadata {
     pub additional_context_tool_output: bool,
 
     /// Whether a developer message was supplied by a client or a client requested tool-output retention.
+    ///
+    /// Use this field only to interpret older rollouts.
+    /// Store new retention decisions in `retain_across_windows`.
     #[serde(default)]
     pub client_authored: bool,
+
+    /// Per-item override of the thread's context-window retention policy.
+    /// Never sent to the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retain_across_windows: Option<bool>,
 
     /// The originating history budget, including any tool-specific allowance.
     /// Measured in tokens and reused when replaying persisted history.
@@ -165,6 +179,21 @@ pub struct CodexHarnessMetadata {
     pub sender_user_messages: Option<Box<SenderUserMessages>>,
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, JsonSchema)]
+pub struct ImageReplaySource {
+    pub prepared_url_digest: Vec<u8>,
+    pub detail: Option<codex_protocol::models::ImageDetail>,
+    pub original_data_url: Arc<String>,
+}
+
+impl std::fmt::Debug for ImageReplaySource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageReplaySource")
+            .field("original_data_url_len", &self.original_data_url.len())
+            .finish_non_exhaustive()
+    }
+}
+
 fn deserialize_mcp_attribution_checkpoint<'de, D>(
     deserializer: D,
 ) -> Result<Option<McpAttribution>, D::Error>
@@ -197,6 +226,13 @@ impl CodexHarnessMetadata {
 }
 
 impl ResponseItemEnvelope {
+    /// Whether the client requested that this item survive context-window changes and forks.
+    pub fn is_always_retained(&self) -> bool {
+        self.metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.retain_across_windows == Some(true))
+    }
+
     /// Wraps a raw Responses API item for persisted history.
     pub fn new(item: ResponseItem) -> Self {
         Self {
@@ -214,6 +250,19 @@ impl ResponseItemEnvelope {
 impl From<ResponseItem> for ResponseItemEnvelope {
     fn from(item: ResponseItem) -> Self {
         Self::new(item)
+    }
+}
+
+impl From<InjectedResponseItem> for ResponseItemEnvelope {
+    fn from(injected: InjectedResponseItem) -> Self {
+        let mut envelope = Self::new(injected.item);
+        if injected.retention != ItemRetention::Unspecified {
+            envelope
+                .metadata
+                .get_or_insert_default()
+                .retain_across_windows = Some(injected.retention == ItemRetention::Always);
+        }
+        envelope
     }
 }
 

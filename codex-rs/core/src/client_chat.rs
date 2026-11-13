@@ -27,7 +27,7 @@ impl ModelClientSession {
     )]
     pub(super) async fn stream_chat_api(
         &self,
-        prompt: &Prompt,
+        prompt: &Arc<Prompt>,
         model_info: &ModelInfo,
         session_telemetry: &SessionTelemetry,
         effort: Option<ReasoningEffortConfig>,
@@ -106,7 +106,6 @@ impl ModelClientSession {
                 }
                 request.input = input;
             }
-            inference_trace_attempt.record_started(&request);
             let client = ApiChatCompletionsClient::new(
                 transport,
                 client_setup.api_provider,
@@ -114,7 +113,16 @@ impl ModelClientSession {
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
 
-            match client.stream_request(&request, options).await {
+            let stream_result = client
+                .stream_request_with_observer(&request, options, |wire| {
+                    inference_trace_attempt.record_started(
+                        wire.clone(),
+                        Arc::clone(prompt),
+                        || Ok(None),
+                    );
+                })
+                .await;
+            match stream_result {
                 Ok(stream) => {
                     return Ok(map_response_stream(
                         stream,

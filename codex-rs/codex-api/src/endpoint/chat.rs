@@ -67,6 +67,18 @@ impl<T: HttpTransport> ChatCompletionsClient<T> {
         request: &ResponsesApiRequest,
         options: ResponsesOptions,
     ) -> Result<ResponseStream, ApiError> {
+        self.stream_request_with_observer(request, options, |_| {})
+            .await
+    }
+
+    /// Like `stream_request`, and hands the encoded chat-completions body to `on_encoded` before
+    /// it is sent (the rollout trace records the exact wire request).
+    pub async fn stream_request_with_observer(
+        &self,
+        request: &ResponsesApiRequest,
+        options: ResponsesOptions,
+        on_encoded: impl FnOnce(&bytes::Bytes),
+    ) -> Result<ResponseStream, ApiError> {
         let ResponsesOptions {
             session_id,
             thread_id,
@@ -78,6 +90,7 @@ impl<T: HttpTransport> ChatCompletionsClient<T> {
         let chat_request = build_chat_request(request)?;
         let body = EncodedJsonBody::encode(&chat_request.body)
             .map_err(|e| ApiError::Stream(format!("failed to encode chat request: {e}")))?;
+        on_encoded(body.shared_bytes());
 
         let mut headers = extra_headers;
         if let Some(ref thread_id) = thread_id {

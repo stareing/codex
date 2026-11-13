@@ -290,6 +290,15 @@ fn compacted_user_message<'a>(text: &str, original: &'a ResponseItem) -> Compact
     }
 }
 
+fn compact_items(items: &[ResponseItemEnvelope], summary: &str) -> Vec<ResponseItemEnvelope> {
+    build_compacted_history_with_limit(
+        items,
+        summary,
+        COMPACT_USER_MESSAGE_MAX_TOKENS,
+        &FileAudioDurations::default(),
+    )
+}
+
 #[tokio::test]
 async fn extension_window_prefix_precedes_retained_turns_and_is_not_repeated() {
     use codex_extension_api::PreviousWorldStateSection;
@@ -447,7 +456,9 @@ fn collect_annotated_user_messages_extracts_user_text_only(
         ResponseItemEnvelope::new(ResponseItem::Other),
     ];
 
-    let collected = collect_annotated_user_messages(&items);
+    let collected: Vec<_> = annotated_user_messages(&items)
+        .map(|(_, message)| message)
+        .collect();
 
     if !preserve_content {
         item = user_message(expected_text);
@@ -476,7 +487,7 @@ fn collect_annotated_user_messages_extracts_user_text_only(
         }]
     );
     assert_eq!(
-        build_compacted_history(Vec::new(), &collected, "summary"),
+        compact_items(&items, "summary"),
         vec![
             expected,
             ResponseItemEnvelope::new(ContextualUserFragment::into(CompactionSummary::new(
@@ -594,10 +605,10 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages(
         .set_id(Some(ResponseItemId::with_suffix("msg", "long-user")));
     original.metadata = Some(CodexHarnessMetadata::default());
     let history = super::build_compacted_history_with_limit(
-        Vec::new(),
-        &collect_annotated_user_messages(std::slice::from_ref(&original)),
+        std::slice::from_ref(&original),
         "SUMMARY",
         max_tokens,
+        &FileAudioDurations::default(),
     );
     assert_eq!(history.len(), 2);
 
@@ -671,12 +682,10 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages(
 
 #[test]
 fn build_token_limited_compacted_history_appends_summary_message() {
-    let initial_context: Vec<ResponseItemEnvelope> = Vec::new();
-    let original = user_message("first user message");
-    let user_messages = collect_user_messages(std::slice::from_ref(&original));
+    let items = annotated(vec![user_message("first user message")]);
     let summary_text = "summary text";
 
-    let history = build_compacted_history(initial_context, &user_messages, summary_text);
+    let history = compact_items(&items, summary_text);
     assert!(
         !history.is_empty(),
         "expected compacted history to include summary"
@@ -722,11 +731,7 @@ fn build_compacted_history_preserves_user_message_passthrough_metadata(attribute
         item: original,
         metadata: Some(CodexHarnessMetadata::default()),
     };
-    let history = build_compacted_history(
-        Vec::new(),
-        &collect_annotated_user_messages(std::slice::from_ref(&original)),
-        "summary text",
-    );
+    let history = compact_items(std::slice::from_ref(&original), "summary text");
 
     assert_eq!(
         history,
@@ -1096,7 +1101,9 @@ fn partial_compaction_pivot_refuses_a_turn_before_a_whole_compaction() {
 fn a_partial_summary_does_not_hide_the_kept_turns_before_it() {
     let items = three_turns();
     let mut history = build_partial_compacted_history(
-        &items[..partial_compaction_pivot(&items, "turn-3").unwrap()],
+        &items,
+        partial_compaction_pivot(&items, "turn-3").unwrap(),
+        &FileAudioDurations::default(),
         &summary_message("recent", CompactionPhase::StandaloneTurn),
         "turn-c",
     );
@@ -1115,7 +1122,13 @@ fn partial_compaction_keeps_the_prefix_verbatim_and_puts_the_summary_after_it() 
         "what turns two and three did",
         CompactionPhase::StandaloneTurn,
     );
-    let history = build_partial_compacted_history(&items[..pivot], &summary, "turn-c");
+    let history = build_partial_compacted_history(
+        &items,
+        pivot,
+        &FileAudioDurations::default(),
+        &summary,
+        "turn-c",
+    );
 
     assert_eq!(&history[..pivot], &items[..pivot]);
     assert_eq!(history.len(), pivot + 1);
@@ -1128,6 +1141,39 @@ fn partial_compaction_keeps_the_prefix_verbatim_and_puts_the_summary_after_it() 
     };
     assert_eq!(user.message(), summary);
     assert!(!is_whole_compaction_boundary(last));
+}
+
+#[test]
+fn partial_compaction_keeps_always_retained_items_of_the_summarized_part() {
+    let items = three_turns();
+    let pivot = partial_compaction_pivot(&items, "turn-2").unwrap();
+    // A client injected this into the summarized part with `retention: "always"`.
+    let mut retained = in_turn(developer_message("pinned by the client"), "turn-2");
+    retained
+        .metadata
+        .get_or_insert_default()
+        .retain_across_windows = Some(true);
+    let mut items = items;
+    items.insert(pivot + 1, retained.clone());
+    let summary = summary_message("recent", CompactionPhase::StandaloneTurn);
+
+    let history = build_partial_compacted_history(
+        &items,
+        pivot,
+        &FileAudioDurations::default(),
+        &summary,
+        "turn-c",
+    );
+
+    assert_eq!(&history[..pivot], &items[..pivot]);
+    assert_eq!(history[pivot], retained);
+    assert_eq!(history.len(), pivot + 2);
+    assert!(
+        history
+            .last()
+            .and_then(|last| last.metadata.as_ref())
+            .is_some_and(|metadata| metadata.partial_compaction_summary)
+    );
 }
 
 #[test]

@@ -124,6 +124,7 @@ async fn mcp_server_tool_call_returns_tool_result() -> Result<()> {
         .request(|request_id| ClientRequest::McpServerToolCall {
             request_id,
             params: McpServerToolCallParams {
+                environment_id: None,
                 thread_id: thread_id.clone(),
                 server: TEST_SERVER_NAME.to_string(),
                 tool: TEST_TOOL_NAME.to_string(),
@@ -211,6 +212,7 @@ async fn mcp_server_tool_call_preserves_protocol_errors(protocol: ProtocolVersio
     ] {
         let request_id = mcp
             .send_mcp_server_tool_call_request(McpServerToolCallParams {
+                environment_id: None,
                 thread_id: thread.id.clone(),
                 server: server.to_string(),
                 tool: TEST_TOOL_NAME.to_string(),
@@ -288,6 +290,7 @@ async fn mcp_server_tool_call_forwards_only_server_extensions() -> Result<()> {
         .request(|request_id| ClientRequest::McpServerToolCall {
             request_id,
             params: McpServerToolCallParams {
+                environment_id: None,
                 thread_id: thread_id.clone(),
                 server: TEST_SERVER_NAME.to_string(),
                 tool: TEST_TOOL_NAME.to_string(),
@@ -433,6 +436,7 @@ async fn mcp_server_tool_call_returns_error_for_unknown_thread() -> Result<()> {
 
     let request_id = mcp
         .send_mcp_server_tool_call_request(McpServerToolCallParams {
+            environment_id: None,
             thread_id: "00000000-0000-4000-8000-000000000000".to_string(),
             server: TEST_SERVER_NAME.to_string(),
             tool: TEST_TOOL_NAME.to_string(),
@@ -602,6 +606,7 @@ async fn assert_full_access_form_elicitation_is_declined(
 
     let request_id = mcp
         .send_mcp_server_tool_call_request(McpServerToolCallParams {
+            environment_id: None,
             thread_id: thread.id,
             server: TEST_SERVER_NAME.to_string(),
             tool: TEST_TOOL_NAME.to_string(),
@@ -700,6 +705,7 @@ async fn mcp_server_tool_call_round_trips_elicitation_for_thread(
 
     let tool_call_request_id = mcp
         .send_mcp_server_tool_call_request(McpServerToolCallParams {
+            environment_id: None,
             thread_id: thread.id.clone(),
             server: TEST_SERVER_NAME.to_string(),
             tool: TEST_TOOL_NAME.to_string(),
@@ -733,6 +739,7 @@ async fn mcp_server_tool_call_round_trips_elicitation_for_thread(
             thread_id: thread.id,
             turn_id: None,
             server_name: TEST_SERVER_NAME.to_string(),
+            environment_id: None,
             request: McpServerElicitationRequest::Form {
                 meta: None,
                 message: ELICITATION_MESSAGE.to_string(),
@@ -858,6 +865,7 @@ async fn mcp_server_elicitation_survives_environment_runtime_refresh() -> Result
 
     let tool_call_request_id = mcp
         .send_mcp_server_tool_call_request(McpServerToolCallParams {
+            environment_id: None,
             thread_id: thread.id.clone(),
             server: TEST_SERVER_NAME.to_string(),
             tool: TEST_TOOL_NAME.to_string(),
@@ -942,6 +950,7 @@ async fn mcp_server_tool_call_forwards_url_elicitation() -> Result<()> {
 
     let tool_call_request_id = mcp
         .send_mcp_server_tool_call_request(McpServerToolCallParams {
+            environment_id: None,
             thread_id: thread.id.clone(),
             server: TEST_SERVER_NAME.to_string(),
             tool: TEST_TOOL_NAME.to_string(),
@@ -966,6 +975,7 @@ async fn mcp_server_tool_call_forwards_url_elicitation() -> Result<()> {
             thread_id: thread.id,
             turn_id: None,
             server_name: TEST_SERVER_NAME.to_string(),
+            environment_id: None,
             request: McpServerElicitationRequest::Url {
                 meta: None,
                 message: URL_ELICITATION_MESSAGE.to_string(),
@@ -1090,6 +1100,7 @@ async fn mcp_tool_call_completion_notification_contains_truncated_large_result()
     let serialized_item = serde_json::to_string(&ThreadItemPayload::McpToolCall {
         id,
         server,
+        environment_id: None,
         tool,
         status,
         arguments: json!({ "message": LARGE_RESPONSE_MESSAGE }),
@@ -1129,11 +1140,8 @@ async fn mcp_tool_call_completion_notification_contains_truncated_large_result()
         })
         .collect();
     assert_eq!(completions.len(), 1);
-    let payload_path = completions[0]["runtime_payload"]["path"]
-        .as_str()
-        .expect("MCP runtime payload path");
-    let payload: serde_json::Value =
-        serde_json::from_reader(std::fs::File::open(bundle.join(payload_path))?)?;
+    let reference = serde_json::from_value(completions[0]["runtime_payload"].clone())?;
+    let payload = codex_rollout_trace::PayloadReader::new(&bundle).read_json(&reference)?;
     let expected = json!({
         "content": [
             {"type": "text", "text": "large-mcp-content-".repeat(DEFAULT_OUTPUT_BYTES_CAP / 8)},
@@ -1243,6 +1251,7 @@ async fn mcp_tool_call_hint_survives_mid_call_thread_read_and_resume() -> Result
     let expected_item = ThreadItemPayload::McpToolCall {
         id: call_id.to_string(),
         server: TEST_SERVER_NAME.to_string(),
+        environment_id: None,
         tool: TEST_TOOL_NAME.to_string(),
         status: McpToolCallStatus::InProgress,
         arguments: json!({ "message": ELICITATION_TRIGGER_MESSAGE }),
