@@ -1325,6 +1325,90 @@ async fn sandbox_blocks_explicit_split_policy_carveouts_under_bwrap() {
 }
 
 #[tokio::test]
+async fn synthetic_root_and_dev_reject_writes_outside_writable_roots() {
+    if should_skip_bwrap_tests().await {
+        eprintln!("skipping bwrap test: bwrap sandbox prerequisites are unavailable");
+        return;
+    }
+
+    let tmpdir = tempfile::tempdir().expect("tempdir");
+    let workspace = tmpdir.path().join("ws");
+    std::fs::create_dir(&workspace).expect("create workspace");
+    let sandbox_helper_dir = codex_linux_sandbox_exe()
+        .parent()
+        .expect("sandbox helper should have a parent")
+        .to_path_buf();
+    let path_entry = |path: &std::path::Path, access| FileSystemSandboxEntry {
+        path: FileSystemPath::Path {
+            path: AbsolutePathBuf::try_from(path)
+                .expect("absolute path")
+                .into(),
+        },
+        access,
+        missing_path_behavior: None,
+    };
+    let file_system_sandbox_policy = FileSystemSandboxPolicy::restricted(vec![
+        FileSystemSandboxEntry {
+            path: FileSystemPath::Special {
+                value: FileSystemSpecialPath::Minimal,
+            },
+            access: FileSystemAccessMode::Read,
+            missing_path_behavior: None,
+        },
+        path_entry(&sandbox_helper_dir, FileSystemAccessMode::Read),
+        path_entry(&workspace, FileSystemAccessMode::Write),
+    ]);
+    let permission_profile = PermissionProfile::from_runtime_permissions(
+        &file_system_sandbox_policy,
+        NetworkSandboxPolicy::Restricted,
+    );
+    // Each probe prints LEAK when a write outside the writable roots succeeds.
+    let script = format!(
+        r#"
+probe() {{ if (eval "$1") 2>/dev/null; then echo "LEAK $1"; fi; }}
+probe ': > /rootfile'
+probe 'mkdir /rootdir'
+probe ': > /dev/rootfile'
+probe 'mkdir /dev/rootdir'
+: > /rootfile || :
+printf ok > /dev/null
+printf ok > {workspace}/granted
+"#,
+        workspace = workspace.display()
+    );
+    let output = run_cmd_result_with_permission_profile_for_cwd(
+        &["bash", "-c", &script],
+        AbsolutePathBuf::try_from(workspace.as_path()).expect("absolute workspace"),
+        permission_profile,
+        create_env_from_core_vars(),
+        LONG_TIMEOUT_MS,
+        /*use_legacy_landlock*/ false,
+    )
+    .await
+    .expect("sandboxed command should execute");
+
+    assert_eq!(
+        output.exit_code, 0,
+        "stdout:\n{}\nstderr:\n{}",
+        output.stdout.text, output.stderr.text
+    );
+    assert!(
+        !output.stdout.text.contains("LEAK"),
+        "stdout:\n{}",
+        output.stdout.text
+    );
+    assert!(
+        output.stderr.text.contains("Read-only file system"),
+        "stderr:\n{}",
+        output.stderr.text
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("granted")).expect("granted write"),
+        "ok"
+    );
+}
+
+#[tokio::test]
 async fn sandbox_starts_with_denied_tmp_without_exposing_registry() {
     if should_skip_bwrap_tests().await {
         eprintln!("skipping bwrap test: bwrap sandbox prerequisites are unavailable");

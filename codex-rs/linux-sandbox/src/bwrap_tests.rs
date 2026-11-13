@@ -1643,3 +1643,229 @@ fn synthetic_mount_target_paths(args: &BwrapArgs) -> Vec<PathBuf> {
         .map(|target| target.path().to_path_buf())
         .collect()
 }
+
+fn synthetic_root_policy(writable: &[&Path]) -> FileSystemSandboxPolicy {
+    let mut entries = vec![FileSystemSandboxEntry {
+        path: FileSystemPath::Special {
+            value: FileSystemSpecialPath::Minimal,
+        },
+        access: FileSystemAccessMode::Read,
+        missing_path_behavior: None,
+    }];
+    entries.extend(writable.iter().map(|path| {
+        FileSystemSandboxEntry::new(
+            AbsolutePathBuf::from_absolute_path(path)
+                .expect("absolute writable root")
+                .into(),
+            FileSystemAccessMode::Write,
+        )
+    }));
+    FileSystemSandboxPolicy::restricted(entries)
+}
+
+fn position_of(args: &[String], window: &[&str]) -> Option<usize> {
+    args.windows(window.len())
+        .position(|candidate| candidate == window)
+}
+
+/// Asserts both synthetic-root remounts exist and follow every mount op.
+fn assert_synthetic_root_remounts_follow_every_mount(args: &[String]) {
+    let root_remount = position_of(args, &["--remount-ro", "/"]).expect("root remount");
+    let dev_remount = position_of(args, &["--remount-ro", "/dev"]).expect("/dev remount");
+    let separator = args.iter().position(|arg| arg == "--").expect("separator");
+    assert!(root_remount < separator && dev_remount < separator);
+    let last_mount_op = args[..separator]
+        .iter()
+        .enumerate()
+        .filter(|(_, arg)| {
+            [
+                "--bind",
+                "--ro-bind",
+                "--bind-try",
+                "--ro-bind-try",
+                "--tmpfs",
+                "--dev",
+                "--proc",
+                "--dir",
+                "--symlink",
+                "--ro-bind-data",
+                "--bind-data",
+                "--file",
+            ]
+            .contains(&arg.as_str())
+        })
+        .map(|(index, _)| index)
+        .max()
+        .expect("mount ops");
+    let last_other_remount = args[..separator]
+        .windows(2)
+        .enumerate()
+        .filter(|(_, window)| {
+            window[0] == "--remount-ro" && window[1] != "/" && window[1] != "/dev"
+        })
+        .map(|(index, _)| index)
+        .max();
+    let first_root_remount = root_remount.min(dev_remount);
+    assert!(
+        last_mount_op < first_root_remount
+            && last_other_remount.is_none_or(|index| index < first_root_remount),
+        "remount must follow every mount op: {args:#?}"
+    );
+}
+
+#[test]
+fn synthetic_root_is_remounted_read_only_after_every_mount() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let workspace = temp_dir.path().join("ws");
+    std::fs::create_dir(&workspace).expect("create workspace");
+    let policy = synthetic_root_policy(&[workspace.as_path()]);
+    let options = BwrapOptions {
+        mask_wsl_interop: true,
+        ..BwrapOptions::default()
+    };
+
+    let args = create_bwrap_command_args(
+        vec!["/bin/true".to_string()],
+        &policy,
+        &workspace,
+        &workspace,
+        options,
+    )
+    .expect("bwrap args")
+    .args;
+
+    assert!(args.starts_with(&[
+        "--new-session".to_string(),
+        "--die-with-parent".to_string(),
+        "--tmpfs".to_string(),
+        "/".to_string(),
+    ]));
+    assert_synthetic_root_remounts_follow_every_mount(&args);
+    let workspace = path_to_string(&workspace.canonicalize().expect("canonical workspace"));
+    assert!(position_of(&args, &["--bind", &workspace, &workspace]).is_some());
+    assert!(position_of(&args, &["--tmpfs", WSL_INTEROP_DIR]).is_some());
+}
+
+#[test_case::test_case(true; "fresh_proc")]
+#[test_case::test_case(false; "masked_host_proc")]
+fn synthetic_root_remount_follows_wsl_and_proc_masks(mount_proc: bool) {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let workspace = temp_dir.path().join("ws");
+    std::fs::create_dir(&workspace).expect("create workspace");
+    let policy = synthetic_root_policy(&[workspace.as_path()]);
+
+    let args = create_bwrap_command_args(
+        vec!["/bin/true".to_string()],
+        &policy,
+        &workspace,
+        &workspace,
+        BwrapOptions {
+            mount_proc,
+            mask_wsl_interop: true,
+            mask_wslg_distro: true,
+            ..BwrapOptions::default()
+        },
+    )
+    .expect("bwrap args")
+    .args;
+
+    assert_synthetic_root_remounts_follow_every_mount(&args);
+    let root_remount = position_of(&args, &["--remount-ro", "/"]).expect("root remount");
+    let late_masks: [&[&str]; 3] = [
+        &["--tmpfs", WSL_INTEROP_DIR],
+        &["--remount-ro", WSLG_DISTRO_ROOT],
+        if mount_proc {
+            &["--proc", "/proc"]
+        } else {
+            &["--tmpfs", "/proc"]
+        },
+    ];
+    for mask in late_masks {
+        let position = position_of(&args, mask).unwrap_or_else(|| panic!("missing {mask:?}"));
+        assert!(position < root_remount, "{mask:?} after root remount");
+    }
+}
+
+#[test]
+fn synthetic_root_keeps_granted_tmp_and_dev_shm_writable() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let tmp = Path::new("/tmp");
+    let shm = Path::new("/dev/shm");
+    if !tmp.is_dir() || !shm.is_dir() || tmp.is_symlink() || shm.is_symlink() {
+        return;
+    }
+    let policy = synthetic_root_policy(&[tmp, shm]);
+
+    let args = create_filesystem_args(&policy, temp_dir.path(), BwrapOptions::default())
+        .expect("filesystem args")
+        .args;
+
+    assert!(position_of(&args, &["--bind", "/tmp", "/tmp"]).is_some());
+    assert!(position_of(&args, &["--bind", "/dev/shm", "/dev/shm"]).is_some());
+    assert_eq!(
+        synthetic_root_read_only_remounts(&args),
+        ["--remount-ro", "/", "--remount-ro", "/dev"]
+    );
+}
+
+#[test]
+fn read_only_remounts_only_apply_to_a_synthetic_root() {
+    let strings = |args: &[&str]| args.iter().map(ToString::to_string).collect::<Vec<_>>();
+    for (filesystem_args, expected) in [
+        (
+            strings(&["--tmpfs", "/", "--dev", "/dev"]),
+            strings(&["--remount-ro", "/", "--remount-ro", "/dev"]),
+        ),
+        (
+            strings(&["--tmpfs", "/", "--dev", "/dev", "--bind", "/dev", "/dev"]),
+            strings(&["--remount-ro", "/"]),
+        ),
+        (
+            strings(&["--tmpfs", "/", "--dev", "/dev", "--bind", "/", "/"]),
+            Vec::new(),
+        ),
+        (
+            strings(&["--ro-bind", "/", "/", "--dev", "/dev"]),
+            Vec::new(),
+        ),
+    ] {
+        assert_eq!(
+            synthetic_root_read_only_remounts(&filesystem_args),
+            expected,
+            "{filesystem_args:?}"
+        );
+    }
+}
+
+#[test]
+fn full_read_policy_is_not_remounted() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+        path: FileSystemPath::Special {
+            value: FileSystemSpecialPath::Root,
+        },
+        access: FileSystemAccessMode::Read,
+        missing_path_behavior: None,
+    }]);
+
+    let args = create_bwrap_command_args(
+        vec!["/bin/true".to_string()],
+        &policy,
+        temp_dir.path(),
+        temp_dir.path(),
+        BwrapOptions::default(),
+    )
+    .expect("bwrap args")
+    .args;
+
+    assert_eq!(
+        position_of(&args, &["--remount-ro", "/"]),
+        None,
+        "{args:#?}"
+    );
+    assert_eq!(
+        position_of(&args, &["--remount-ro", "/dev"]),
+        None,
+        "{args:#?}"
+    );
+}

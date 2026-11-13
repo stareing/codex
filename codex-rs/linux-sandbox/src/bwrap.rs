@@ -329,6 +329,7 @@ fn create_bwrap_flags(
         preserved_files,
         synthetic_mount_targets,
     } = create_filesystem_args(file_system_sandbox_policy, sandbox_policy_cwd, options)?;
+    let synthetic_root_remounts = synthetic_root_read_only_remounts(&filesystem_args);
     let normalized_command_cwd = normalize_command_cwd_for_bwrap(command_cwd);
     let mut args = Vec::new();
     args.push("--new-session".to_string());
@@ -364,6 +365,11 @@ fn create_bwrap_flags(
         args.push("--proc".to_string());
         args.push("/proc".to_string());
     }
+    // Must follow every mount op above, including the WSL and /proc masks:
+    // bubblewrap applies them in order and cannot create a mount point on a
+    // read-only root. Namespace flags, `--chdir`, and the `--argv0` that the
+    // launcher inserts before `--` do not create anything under `/`.
+    args.extend(synthetic_root_remounts);
     if normalized_command_cwd.as_path() != command_cwd {
         // Bubblewrap otherwise inherits the helper's logical cwd, which can be
         // a symlink alias that disappears once the sandbox only mounts
@@ -383,6 +389,37 @@ fn create_bwrap_flags(
     })
 }
 
+/// Read-only remounts that close a synthetic (`--tmpfs /`) root.
+///
+/// Without them the fresh root tmpfs and bubblewrap's `--dev` tmpfs stay
+/// writable: files outside every writable root (`/rootfile`, `/tmp/*` when
+/// `/tmp` is not granted, `/dev/*`) would land in RAM, outside the configured
+/// roots and any disk quota behind them. Writes there now need an explicit
+/// writable root such as `/tmp` or `/dev/shm`. `--remount-ro` is not
+/// recursive, so writable binds below keep their own flags, and device nodes
+/// such as `/dev/null` stay writable on a read-only mount.
+///
+/// Returns nothing unless `filesystem_args` starts from `--tmpfs /`; a target
+/// that is itself bound writable is left alone.
+fn synthetic_root_read_only_remounts(filesystem_args: &[String]) -> Vec<String> {
+    if !filesystem_args.starts_with(&["--tmpfs".to_string(), "/".to_string()]) {
+        return Vec::new();
+    }
+    let binds_writable = |target: &str| {
+        filesystem_args
+            .windows(3)
+            .any(|window| window[0] == "--bind" && window[2] == target)
+    };
+    if binds_writable("/") {
+        return Vec::new();
+    }
+    ["/", "/dev"]
+        .into_iter()
+        .filter(|target| !binds_writable(target))
+        .flat_map(|target| ["--remount-ro".to_string(), target.to_string()])
+        .collect()
+}
+
 /// Build the bubblewrap filesystem mounts for a given filesystem policy.
 ///
 /// The mount order is important:
@@ -400,6 +437,8 @@ fn create_bwrap_flags(
 ///    those writable roots so protected subpaths win.
 /// 6. Nested unreadable carveouts under a writable root are masked after that
 ///    root is bound, and unrelated unreadable roots are masked afterward.
+/// 7. `create_bwrap_flags` remounts a synthetic root and its `/dev` read-only
+///    after every mount, see [`synthetic_root_read_only_remounts`].
 fn create_filesystem_args(
     file_system_sandbox_policy: &FileSystemSandboxPolicy,
     cwd: &Path,
