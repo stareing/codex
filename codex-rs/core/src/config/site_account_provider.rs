@@ -281,6 +281,13 @@ pub(crate) fn resolve_provider(
     source
 }
 
+/// Whether [`SITE_PROVIDER_ID`] will be in the loaded config (a site sign-in under `codex_home` or
+/// the launcher's `SITE_RELAY_*` variables). Checks that read the raw config layers, before
+/// [`resolve_provider`] adds the site provider, use this to accept it.
+pub fn site_provider_available(codex_home: &Path) -> bool {
+    SiteModelAccess::load(codex_home).is_some()
+}
+
 /// Shown when a branded binary has neither a sign-in nor a configured provider.
 pub const NO_MODEL_CONFIGURED: &str = "No model configured. Sign in to use Onigio's models: \
 `onigio login` (or `login --password`), or set `model_provider` and `model` in \

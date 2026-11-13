@@ -536,6 +536,10 @@ impl ConfigManager {
         if let Some(saved) = saved_provider {
             typesafe_overrides.model_provider = Some(saved.to_owned());
         }
+        // The site provider is added while the config is built, after this check reads the layers.
+        let site_provider = codex_core::config::site_account_provider::site_provider_available(
+            self.codex_home.as_path(),
+        );
         self.load_with_validation(
             &self.current_cli_overrides(),
             request_overrides,
@@ -563,7 +567,10 @@ impl ConfigManager {
                             },
                         ));
                     }
-                    if !config.model_providers.contains_key(provider)
+                    let site = site_provider
+                        && provider == codex_core::config::site_account_provider::SITE_PROVIDER_ID;
+                    if !site
+                        && !config.model_providers.contains_key(provider)
                         && !built_in_model_providers(config.openai_base_url.clone())
                             .contains_key(provider)
                     {

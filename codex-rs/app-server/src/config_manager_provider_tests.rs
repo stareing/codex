@@ -261,3 +261,35 @@ async fn catalog_reload_uses_latest_model_provider() -> Result<()> {
     assert_eq!(refreshed.model_provider_id, "openai");
     Ok(())
 }
+
+/// A thread saved with the site provider resumes while signed in (the provider exists only once the
+/// config is built from the sign-in), and is refused as not configured once signed out.
+#[tokio::test]
+async fn resume_accepts_the_site_provider_while_signed_in() -> Result<()> {
+    use codex_core::config::site_account_provider::SITE_ACCOUNT_FILE;
+    use codex_core::config::site_account_provider::SITE_ACCOUNT_TOKEN_FILE;
+    use codex_core::config::site_account_provider::SITE_PROVIDER_ID;
+    let home = tempdir()?;
+    let manager = || ConfigManager::without_managed_config_for_tests(home.path().to_path_buf());
+    let resume = |manager: ConfigManager| async move {
+        manager
+            .load_for_resume(
+                Some(SITE_PROVIDER_ID),
+                /*request_overrides*/ None,
+                ConfigOverrides::default(),
+                /*cwd*/ None,
+            )
+            .await
+    };
+    let signed_out = resume(manager()).await.unwrap_err();
+    assert_eq!(signed_out.kind(), std::io::ErrorKind::NotFound);
+
+    std::fs::write(
+        home.path().join(SITE_ACCOUNT_FILE),
+        r#"{"relay_url":"https://relay.example/agent-relay/","account_id":"acct-1"}"#,
+    )?;
+    std::fs::write(home.path().join(SITE_ACCOUNT_TOKEN_FILE), "token")?;
+    let config = resume(manager()).await?;
+    assert_eq!(config.model_provider_id, SITE_PROVIDER_ID);
+    Ok(())
+}
