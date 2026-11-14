@@ -341,22 +341,53 @@ pub fn own_catalog_fallback(
 /// starts the agent with one model the user configured, on a server that has none of the bundled upstream presets.
 pub const DESKTOP_CUSTOM_PROVIDER_ID: &str = "onigio_custom";
 
-/// The catalog of the desktop app's custom model when no `model_catalog_json` is set: just that model. Without it
-/// `model/list` showed the bundled upstream presets next to it (11-14), which that endpoint does not serve.
+/// Environment variable with the other model names the desktop app's custom endpoint serves (a JSON array of
+/// strings): one address and key, several models (the app's «more models» field). Read by [`desktop_custom_extra_models`].
+pub const DESKTOP_CUSTOM_MODELS_ENV: &str = "ONIGIO_CUSTOM_MODELS";
+
+/// Most extra model names taken from [`DESKTOP_CUSTOM_MODELS_ENV`]; the app allows fewer.
+const MAX_DESKTOP_CUSTOM_MODELS: usize = 64;
+
+/// The extra model names of the desktop app's custom endpoint, from [`DESKTOP_CUSTOM_MODELS_ENV`]. Missing, not a
+/// JSON array of strings, or empty = none (the agent then lists only `model`, as before).
+pub fn desktop_custom_extra_models() -> Vec<String> {
+    std::env::var(DESKTOP_CUSTOM_MODELS_ENV)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// The catalog of the desktop app's custom model when no `model_catalog_json` is set: that model, then the other
+/// models of the same endpoint (`extra`, trimmed, blanks and repeats dropped). Without it `model/list` showed the
+/// bundled upstream presets next to it (11-14), which that endpoint does not serve. `model/list` and `/model`
+/// show all of them; picking one keeps the same address and key.
 pub fn desktop_custom_catalog(
     provider_id: &str,
     model: Option<&str>,
+    extra: &[String],
     configured_catalog: Option<&ModelsResponse>,
 ) -> Option<ModelsResponse> {
     if provider_id != DESKTOP_CUSTOM_PROVIDER_ID || configured_catalog.is_some() {
         return None;
     }
     let slug = model.map(str::trim).filter(|slug| !slug.is_empty())?;
+    let mut slugs: Vec<&str> = vec![slug];
+    for name in extra.iter().map(|name| name.trim()) {
+        if slugs.len() > MAX_DESKTOP_CUSTOM_MODELS {
+            break;
+        }
+        if !name.is_empty() && !name.chars().any(char::is_control) && !slugs.contains(&name) {
+            slugs.push(name);
+        }
+    }
     Some(ModelsResponse {
-        models: vec![ModelInfo {
-            visibility: ModelVisibility::List,
-            ..model_info_from_slug(slug)
-        }],
+        models: slugs
+            .into_iter()
+            .map(|slug| ModelInfo {
+                visibility: ModelVisibility::List,
+                ..model_info_from_slug(slug)
+            })
+            .collect(),
     })
 }
 

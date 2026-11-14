@@ -309,14 +309,75 @@ async fn site_provider_uses_its_own_catalog_seeded_with_the_suggested_model() {
 
 #[test]
 fn desktop_custom_model_lists_only_itself() {
-    let catalog = desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some("claude-opus-5-5"), None)
-        .expect("a custom model has a catalog");
+    let catalog = desktop_custom_catalog(
+        DESKTOP_CUSTOM_PROVIDER_ID,
+        Some("claude-opus-5-5"),
+        &[],
+        None,
+    )
+    .expect("a custom model has a catalog");
     let slugs: Vec<&str> = catalog.models.iter().map(|m| m.slug.as_str()).collect();
     assert_eq!(slugs, vec!["claude-opus-5-5"]);
     assert_eq!(catalog.models[0].visibility, ModelVisibility::List);
     // other providers, no model, or a catalog the user set keep the usual list
-    assert_eq!(desktop_custom_catalog("openai", Some("gpt-5.5"), None), None);
-    assert_eq!(desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, None, None), None);
-    assert_eq!(desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some(" "), None), None);
-    assert_eq!(desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some("m"), Some(&catalog)), None);
+    assert_eq!(
+        desktop_custom_catalog("openai", Some("gpt-5.5"), &[], None),
+        None
+    );
+    assert_eq!(
+        desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, None, &[], None),
+        None
+    );
+    assert_eq!(
+        desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some(" "), &[], None),
+        None
+    );
+    assert_eq!(
+        desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some("m"), &[], Some(&catalog)),
+        None
+    );
+}
+
+#[test]
+fn desktop_custom_endpoint_lists_its_other_models_after_the_default() {
+    let extra: Vec<String> = [
+        "claude-sonnet-5-5",
+        " claude-opus-5-5 ",
+        "",
+        "a\nb",
+        "claude-sonnet-5-5",
+        " claude-haiku-5-5",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let catalog = desktop_custom_catalog(
+        DESKTOP_CUSTOM_PROVIDER_ID,
+        Some("claude-opus-5-5"),
+        &extra,
+        None,
+    )
+    .expect("a custom model has a catalog");
+    let slugs: Vec<&str> = catalog.models.iter().map(|m| m.slug.as_str()).collect();
+    // the default first; blanks, control characters and repeats dropped
+    assert_eq!(
+        slugs,
+        vec!["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
+    );
+    assert!(
+        catalog
+            .models
+            .iter()
+            .all(|m| m.visibility == ModelVisibility::List)
+    );
+    // other providers ignore the list
+    assert_eq!(
+        desktop_custom_catalog("openai", Some("gpt-5.5"), &extra, None),
+        None
+    );
+    // capped
+    let many: Vec<String> = (0..500).map(|i| format!("m{i}")).collect();
+    let capped =
+        desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some("x"), &many, None).unwrap();
+    assert_eq!(capped.models.len(), MAX_DESKTOP_CUSTOM_MODELS + 1);
 }

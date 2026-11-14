@@ -4416,11 +4416,12 @@ impl Config {
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
-        // Onigio fork: the desktop app's custom model lists only itself, not the bundled presets.
+        // Onigio fork: the desktop app's custom model lists only its own endpoint's models, not the bundled presets.
         let model_catalog = model_catalog.clone().or_else(|| {
             site_account_provider::desktop_custom_catalog(
                 &model_provider_id,
                 model.as_deref(),
+                &site_account_provider::desktop_custom_extra_models(),
                 model_catalog.as_ref(),
             )
         });
