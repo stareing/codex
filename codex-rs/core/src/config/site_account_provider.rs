@@ -345,8 +345,24 @@ pub const DESKTOP_CUSTOM_PROVIDER_ID: &str = "onigio_custom";
 /// strings): one address and key, several models (the app's «more models» field). Read by [`desktop_custom_extra_models`].
 pub const DESKTOP_CUSTOM_MODELS_ENV: &str = "ONIGIO_CUSTOM_MODELS";
 
+/// Environment variable with the picker's names for some of those models (a JSON object
+/// `slug -> {"display_name", "description"}`): the app lists the models of the user's other saved endpoints under
+/// slugs of its own and routes them itself, and names them here. Read by [`desktop_custom_model_labels`].
+pub const DESKTOP_CUSTOM_MODEL_LABELS_ENV: &str = "ONIGIO_CUSTOM_MODEL_LABELS";
+
 /// Most extra model names taken from [`DESKTOP_CUSTOM_MODELS_ENV`]; the app allows fewer.
-const MAX_DESKTOP_CUSTOM_MODELS: usize = 64;
+const MAX_DESKTOP_CUSTOM_MODELS: usize = 640;
+
+/// Longest display name or description taken from [`DESKTOP_CUSTOM_MODEL_LABELS_ENV`].
+const MAX_DESKTOP_CUSTOM_LABEL_CHARS: usize = 300;
+
+/// A model's name and description in the picker, from [`DESKTOP_CUSTOM_MODEL_LABELS_ENV`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct DesktopModelLabel {
+    pub display_name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
 
 /// The extra model names of the desktop app's custom endpoint, from [`DESKTOP_CUSTOM_MODELS_ENV`]. Missing, not a
 /// JSON array of strings, or empty = none (the agent then lists only `model`, as before).
@@ -355,6 +371,41 @@ pub fn desktop_custom_extra_models() -> Vec<String> {
         .ok()
         .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
         .unwrap_or_default()
+}
+
+/// The labels in [`DESKTOP_CUSTOM_MODEL_LABELS_ENV`]. Missing or malformed = none (every model shows its slug).
+pub fn desktop_custom_model_labels() -> HashMap<String, DesktopModelLabel> {
+    std::env::var(DESKTOP_CUSTOM_MODEL_LABELS_ENV)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// `catalog` with the [`desktop_custom_model_labels`] applied to the models they name. A blank or over-long name,
+/// or one with control characters, is ignored (the slug stays); so is such a description.
+pub fn with_desktop_custom_labels(
+    mut catalog: ModelsResponse,
+    labels: &HashMap<String, DesktopModelLabel>,
+) -> ModelsResponse {
+    let usable = |text: &str| {
+        let text = text.trim();
+        (!text.is_empty()
+            && text.chars().count() <= MAX_DESKTOP_CUSTOM_LABEL_CHARS
+            && !text.chars().any(char::is_control))
+        .then(|| text.to_string())
+    };
+    for model in &mut catalog.models {
+        let Some(label) = labels.get(&model.slug) else {
+            continue;
+        };
+        if let Some(name) = usable(&label.display_name) {
+            model.display_name = name;
+        }
+        if let Some(description) = label.description.as_deref().and_then(usable) {
+            model.description = Some(description);
+        }
+    }
+    catalog
 }
 
 /// The catalog of the desktop app's custom model when no `model_catalog_json` is set: that model, then the other

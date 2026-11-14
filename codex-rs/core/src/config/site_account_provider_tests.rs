@@ -376,8 +376,49 @@ fn desktop_custom_endpoint_lists_its_other_models_after_the_default() {
         None
     );
     // capped
-    let many: Vec<String> = (0..500).map(|i| format!("m{i}")).collect();
+    let many: Vec<String> = (0..1000).map(|i| format!("m{i}")).collect();
     let capped =
         desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some("x"), &many, None).unwrap();
     assert_eq!(capped.models.len(), MAX_DESKTOP_CUSTOM_MODELS + 1);
+}
+
+#[test]
+fn desktop_custom_labels_name_the_models_of_other_endpoints() {
+    let extra = vec![
+        "custom-b2/deepseek-chat".to_string(),
+        "custom-c3/qwen/qwen3".to_string(),
+    ];
+    let catalog = desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some("opus"), &extra, None)
+        .expect("a custom model has a catalog");
+    let labels: HashMap<String, DesktopModelLabel> = serde_json::from_str(
+        r#"{"custom-b2/deepseek-chat":{"display_name":"deepseek-chat（DeepSeek）","description":"deepseek-chat"},
+            "custom-c3/qwen/qwen3":{"display_name":"  ","description":"a\nb"},
+            "not-listed":{"display_name":"x"}}"#,
+    )
+    .expect("labels parse");
+    let named = with_desktop_custom_labels(catalog, &labels);
+    let shown: Vec<(&str, &str, Option<&str>)> = named
+        .models
+        .iter()
+        .map(|m| {
+            (
+                m.slug.as_str(),
+                m.display_name.as_str(),
+                m.description.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        shown,
+        vec![
+            ("opus", "opus", None),
+            (
+                "custom-b2/deepseek-chat",
+                "deepseek-chat（DeepSeek）",
+                Some("deepseek-chat")
+            ),
+            // a blank name or a description with a control character keeps the slug
+            ("custom-c3/qwen/qwen3", "custom-c3/qwen/qwen3", None),
+        ]
+    );
 }

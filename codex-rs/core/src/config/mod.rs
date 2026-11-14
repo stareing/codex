@@ -4424,6 +4424,12 @@ impl Config {
                 &site_account_provider::desktop_custom_extra_models(),
                 model_catalog.as_ref(),
             )
+            .map(|catalog| {
+                site_account_provider::with_desktop_custom_labels(
+                    catalog,
+                    &site_account_provider::desktop_custom_model_labels(),
+                )
+            })
         });
 
         let log_dir = cfg
