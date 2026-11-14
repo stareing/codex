@@ -474,7 +474,7 @@ impl ChatWidget {
             }),
             item @ ThreadItemPayload::SubAgentActivity { .. } => self.on_sub_agent_activity(item),
             item @ ThreadItemPayload::DynamicToolCall { .. } => self.on_dynamic_tool_item(item),
-            ThreadItemPayload::Sleep(_) => {}
+            ThreadItemPayload::Sleep(_) | ThreadItemPayload::Lsp(_) => {}
         }
 
         if matches!(replay_kind, Some(ReplayKind::ThreadSnapshot)) && turn_id.is_empty() {

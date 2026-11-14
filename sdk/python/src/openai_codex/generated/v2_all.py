@@ -2577,6 +2577,12 @@ class LogoutAccountResponse(BaseModel):
     )
 
 
+class LspItemStatus(Enum):
+    in_progress = "inProgress"
+    completed = "completed"
+    failed = "failed"
+
+
 class ManagedHooksRequirements(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6069,6 +6075,44 @@ class SleepThreadItem(BaseModel):
         ),
     ] = None
     type: Annotated[Literal["sleep"], Field(title="SleepThreadItemType")]
+
+
+class LspThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    character: Annotated[int, Field(ge=0)]
+    completed_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="completedAtMs",
+            description="Unix timestamp in milliseconds when the item completed, if recorded.",
+        ),
+    ] = None
+    file_count: Annotated[int | None, Field(alias="fileCount", ge=0)] = None
+    file_path: Annotated[
+        str, Field(alias="filePath", description="The file as the model named it.")
+    ]
+    id: str
+    line: Annotated[
+        int, Field(description="One-based line and character the model asked about.", ge=0)
+    ]
+    operation: Annotated[str, Field(description="`goToDefinition`, `findReferences`, `hover`, ...")]
+    result: Annotated[
+        str | None,
+        Field(description="The text the model received (or the error), shortened for display."),
+    ] = None
+    result_count: Annotated[int | None, Field(alias="resultCount", ge=0)] = None
+    server: Annotated[str | None, Field(description="The language server that answered.")] = None
+    started_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="startedAtMs",
+            description="Unix timestamp in milliseconds when the item started, if recorded.",
+        ),
+    ] = None
+    status: LspItemStatus
+    type: Annotated[Literal["lsp"], Field(title="LspThreadItemType")]
 
 
 class FileIdThreadItem(BaseModel):
@@ -12930,6 +12974,7 @@ class ThreadItem(
         | WebSearchThreadItem
         | ImageViewThreadItem
         | SleepThreadItem
+        | LspThreadItem
         | FileIdThreadItem
         | ResultThreadItem
         | EnteredReviewModeThreadItem
@@ -12953,6 +12998,7 @@ class ThreadItem(
         | WebSearchThreadItem
         | ImageViewThreadItem
         | SleepThreadItem
+        | LspThreadItem
         | FileIdThreadItem
         | ResultThreadItem
         | EnteredReviewModeThreadItem

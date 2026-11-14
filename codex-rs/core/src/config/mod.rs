@@ -1186,6 +1186,9 @@ pub struct Config {
     /// Additional parameters for the web search tool when it is enabled.
     pub web_search_config: Option<WebSearchConfig>,
 
+    /// `[lsp]`: language servers for the `lsp` tool and diagnostics after edits (off unless enabled).
+    pub lsp: codex_config::LspConfigToml,
+
     /// Whether to register the experimental request_user_input tool.
     pub experimental_request_user_input_enabled: bool,
 
@@ -4067,6 +4070,7 @@ impl Config {
         let web_search_mode =
             resolve_web_search_mode(&cfg, &features).unwrap_or(WebSearchMode::Cached);
         let web_search_config = resolve_web_search_config(&cfg);
+        let lsp = cfg.lsp.clone().unwrap_or_default();
         let experimental_request_user_input_enabled =
             resolve_experimental_request_user_input_enabled(&cfg);
         let update_plan_enabled = resolve_update_plan_enabled(&cfg);
@@ -4826,6 +4830,7 @@ impl Config {
             forced_login_method,
             web_search_mode: constrained_web_search_mode.value,
             web_search_config,
+            lsp,
             experimental_request_user_input_enabled,
             update_plan_enabled,
             tool_registry,

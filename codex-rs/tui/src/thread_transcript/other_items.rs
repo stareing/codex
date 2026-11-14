@@ -140,7 +140,7 @@ pub(super) fn cells(item: ThreadItemPayload, cwd: &AbsolutePathBuf) -> Transcrip
         | ThreadItemPayload::Reasoning { .. }
         | ThreadItemPayload::CommandExecution { .. }
         | ThreadItemPayload::McpToolCall { .. }
-        | ThreadItemPayload::Sleep(_) => {}
+        | ThreadItemPayload::Sleep(_) | ThreadItemPayload::Lsp(_) => {}
     }
     cells
 }

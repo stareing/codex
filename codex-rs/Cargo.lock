@@ -2141,6 +2141,7 @@ dependencies = [
  "codex-http-client",
  "codex-image-generation-extension",
  "codex-login",
+ "codex-lsp-extension",
  "codex-mcp",
  "codex-mcp-extension",
  "codex-memories-extension",
@@ -4066,6 +4067,49 @@ dependencies = [
  "webbrowser",
  "windows-sys 0.61.2",
  "wiremock",
+]
+
+[[package]]
+name = "codex-lsp"
+version = "0.0.0"
+dependencies = [
+ "codex-utils-process",
+ "codex-utils-pty",
+ "indexmap 2.14.0",
+ "libc",
+ "lru",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "which 8.0.0",
+]
+
+[[package]]
+name = "codex-lsp-extension"
+version = "0.0.0"
+dependencies = [
+ "codex-config",
+ "codex-core",
+ "codex-core-plugin-common",
+ "codex-core-plugins",
+ "codex-extension-api",
+ "codex-extension-items",
+ "codex-lsp",
+ "codex-protocol",
+ "codex-tools",
+ "codex-utils-plugins",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml 0.9.11+spec-1.1.0",
+ "tracing",
 ]
 
 [[package]]

@@ -78,6 +78,7 @@ members = [
     "ext/history-notes",
     "ext/image-generation",
     "ext/items",
+    "ext/lsp",
     "ext/memories",
     "ext/mcp",
     "ext/queue",
@@ -88,6 +89,7 @@ members = [
     "file-search",
     "file-watcher",
     "linux-sandbox",
+    "lsp",
     "lmstudio",
     "login",
     "codex-mcp",
@@ -268,6 +270,8 @@ codex-hooks = { path = "hooks" }
 codex-history = { path = "history" }
 codex-keyring-store = { path = "keyring-store" }
 codex-linux-sandbox = { path = "linux-sandbox" }
+codex-lsp = { path = "lsp" }
+codex-lsp-extension = { path = "ext/lsp" }
 codex-lmstudio = { path = "lmstudio" }
 codex-login = { path = "login" }
 codex-mermaid = { path = "mermaid" }

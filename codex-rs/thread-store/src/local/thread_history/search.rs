@@ -351,7 +351,7 @@ fn searchable_text(item: &ThreadItemPayload) -> Option<Cow<'_, str>> {
         | ThreadItemPayload::SubAgentActivity { .. }
         | ThreadItemPayload::WebSearch(_)
         | ThreadItemPayload::ImageView { .. }
-        | ThreadItemPayload::Sleep(_)
+        | ThreadItemPayload::Sleep(_) | ThreadItemPayload::Lsp(_)
         | ThreadItemPayload::ImageGeneration(_)
         | ThreadItemPayload::EnteredReviewMode { .. }
         | ThreadItemPayload::ExitedReviewMode { .. }

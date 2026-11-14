@@ -2787,6 +2787,138 @@
     "LegacyAppPathString": {
       "type": "string"
     },
+    "LspConfigToml": {
+      "additionalProperties": false,
+      "properties": {
+        "diagnostics_wait_ms": {
+          "description": "After an edit, how long the next model step waits for its diagnostics, in milliseconds (default 1500).",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "enabled": {
+          "description": "Turns on the `lsp` tool and diagnostics after edits. Defaults to false.",
+          "type": "boolean"
+        },
+        "idle_shutdown_secs": {
+          "description": "A server unused for this many seconds is stopped (default 600).",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_diagnostics_per_file": {
+          "description": "Diagnostics shown per file (default 10).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_diagnostics_total": {
+          "description": "Diagnostics shown per delivery (default 30).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_servers": {
+          "description": "Language servers running at once in this agent process (default 3).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "request_timeout_ms": {
+          "description": "Time one request may take, in milliseconds (default 30000).",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "servers": {
+          "additionalProperties": {
+            "$ref": "#/definitions/LspServerConfigToml"
+          },
+          "default": {},
+          "description": "Servers by name.",
+          "type": "object"
+        },
+        "startup_timeout_ms": {
+          "description": "Time from starting a server until it is initialized, in milliseconds (default 60000).",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "LspServerConfigToml": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "description": "Program to start (a name on PATH or a path). It must speak LSP over stdio.",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Extra environment for the server process.",
+          "type": "object"
+        },
+        "extensions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "File extension → LSP language id, for example `\".rs\" = \"rust\"`.",
+          "type": "object"
+        },
+        "initialization_options": {
+          "description": "Sent as `initializationOptions` in `initialize`."
+        },
+        "max_restarts": {
+          "description": "After this many failed starts or crashes the server is not started again in this session (default 3).",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "optional": {
+          "default": false,
+          "description": "Ignore this server when its command is not installed (instead of reporting an error on use).",
+          "type": "boolean"
+        },
+        "priority": {
+          "description": "When several servers serve one extension the highest priority wins (default 100).",
+          "format": "int64",
+          "type": "integer"
+        },
+        "settings": {
+          "description": "Answers to the server's `workspace/configuration` requests, by section."
+        },
+        "source": {
+          "description": "Where the entry came from, shown to the model.",
+          "type": "string"
+        },
+        "startup_timeout_ms": {
+          "description": "Overrides `lsp.startup_timeout_ms` for this server.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "workspace_folder": {
+          "description": "A fixed folder used as the server's working directory and its only workspace root (by default each file's project root, found from the nearest version-control marker).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
     "MarketplaceConfig": {
       "additionalProperties": false,
       "properties": {
@@ -8808,6 +8940,14 @@
         }
       ],
       "description": "Directory for log files. Setting this value explicitly also routes the SQLite logs database here and enables the TUI text log in this directory. When unset, log files use `$CODEX_HOME/log` and SQLite logs use `sqlite_home`. Existing SQLite logs in `sqlite_home` are not migrated automatically. A managed `sqlite_home` requirement keeps SQLite logs in that required directory."
+    },
+    "lsp": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/LspConfigToml"
+        }
+      ],
+      "description": "Language servers for the `lsp` tool and diagnostics after edits (off unless enabled)."
     },
     "marketplaces": {
       "additionalProperties": {

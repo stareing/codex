@@ -19,6 +19,8 @@ pub use codex_extension_items::image_generation::GeneratedImageRef;
 pub use codex_extension_items::image_generation::ImageGenerationFailure;
 pub use codex_extension_items::image_generation::ImageGenerationInputImage;
 pub use codex_extension_items::image_generation::ImageGenerationItem;
+pub use codex_extension_items::lsp::LspItem;
+pub use codex_extension_items::lsp::LspItemStatus;
 pub use codex_extension_items::sleep::SleepItem;
 pub use codex_extension_items::web_search::WebSearchAction;
 pub use codex_extension_items::web_search::WebSearchItem;
@@ -499,6 +501,7 @@ pub enum ThreadItemPayload {
         path: LegacyAppPathString,
     },
     Sleep(SleepItem),
+    Lsp(LspItem),
     ImageGeneration(ImageGenerationItem),
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
@@ -570,6 +573,7 @@ impl ThreadItemPayload {
             | Self::ContextCompaction { id, .. } => id,
             Self::WebSearch(item) => &item.id,
             Self::Sleep(item) => &item.id,
+            Self::Lsp(item) => &item.id,
             Self::ImageGeneration(item) => &item.id,
         }
     }
@@ -1102,6 +1106,7 @@ impl From<CoreTurnItem> for ThreadItemPayload {
                 ExtensionItem::ImageGeneration(item) => Self::ImageGeneration(item),
                 ExtensionItem::Sleep(item) => Self::Sleep(item),
                 ExtensionItem::WebSearch(item) => Self::WebSearch(item),
+                ExtensionItem::Lsp(item) => Self::Lsp(item),
             },
             CoreTurnItem::ImageGeneration(image) => Self::ImageGeneration(ImageGenerationItem {
                 id: image.id,

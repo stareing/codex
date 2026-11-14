@@ -9,6 +9,7 @@ use std::path::Path;
 use crate::HooksToml;
 use crate::browser_use::BrowserUseConfigToml;
 use crate::computer_use::ComputerUseConfigToml;
+use crate::lsp::LspConfigToml;
 use crate::permissions_toml::PermissionsToml;
 use crate::profile_toml::ConfigProfile;
 use crate::types::AnalyticsConfigToml;
@@ -207,6 +208,9 @@ pub struct ConfigToml {
     pub browser_use: Option<BrowserUseConfigToml>,
 
     pub computer_use: Option<ComputerUseConfigToml>,
+
+    /// Language servers for the `lsp` tool and diagnostics after edits (off unless enabled).
+    pub lsp: Option<LspConfigToml>,
 
     #[serde(default)]
     pub shell_environment_policy: ShellEnvironmentPolicyToml,

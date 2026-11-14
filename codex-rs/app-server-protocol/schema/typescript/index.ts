@@ -51,6 +51,8 @@ export type { LegacyAppPathString } from "./LegacyAppPathString";
 export type { LocalShellAction } from "./LocalShellAction";
 export type { LocalShellExecAction } from "./LocalShellExecAction";
 export type { LocalShellStatus } from "./LocalShellStatus";
+export type { LspItem } from "./LspItem";
+export type { LspItemStatus } from "./LspItemStatus";
 export type { McpServerInfo } from "./McpServerInfo";
 export type { MessagePhase } from "./MessagePhase";
 export type { ModeKind } from "./ModeKind";

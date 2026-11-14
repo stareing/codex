@@ -1020,6 +1020,14 @@
     "LegacyAppPathString": {
       "type": "string"
     },
+    "LspItemStatus": {
+      "enum": [
+        "inProgress",
+        "completed",
+        "failed"
+      ],
+      "type": "string"
+    },
     "McpAppDisplayMode": {
       "enum": [
         "inline",
@@ -2614,6 +2622,84 @@
             "type"
           ],
           "title": "SleepThreadItem",
+          "type": "object"
+        },
+        {
+          "description": "Display item for one call of the `lsp` code-navigation tool, owned by the LSP extension.",
+          "properties": {
+            "character": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "fileCount": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "filePath": {
+              "description": "The file as the model named it.",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "line": {
+              "description": "One-based line and character the model asked about.",
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "operation": {
+              "description": "`goToDefinition`, `findReferences`, `hover`, ...",
+              "type": "string"
+            },
+            "result": {
+              "description": "The text the model received (or the error), shortened for display.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "resultCount": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "server": {
+              "description": "The language server that answered.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "$ref": "#/definitions/LspItemStatus"
+            },
+            "type": {
+              "enum": [
+                "lsp"
+              ],
+              "title": "LspThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "character",
+            "filePath",
+            "id",
+            "line",
+            "operation",
+            "status",
+            "type"
+          ],
+          "title": "LspThreadItem",
           "type": "object"
         },
         {

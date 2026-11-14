@@ -1038,6 +1038,10 @@ async fn execute_inner(
                                         "id": item.id, "turnId": turn.id, "type": "sleep",
                                         "name": "sleep", "status": null
                                     })),
+                                    ThreadItemPayload::Lsp(item) => Some(json!({
+                                        "id": item.id, "turnId": turn.id, "type": "lsp",
+                                        "name": "lsp", "status": item.status
+                                    })),
                                     ThreadItemPayload::WebSearch(item) => Some(json!({
                                         "id": item.id, "turnId": turn.id, "type": "webSearch",
                                         "name": "webSearch", "status": null
@@ -1569,6 +1573,12 @@ fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Valu
             }),
             ThreadItemPayload::Sleep(item) => json!({
                 "type": "sleep", "id": item.id, "durationMs": item.duration_ms
+            }),
+            ThreadItemPayload::Lsp(item) => json!({
+                "type": "lsp", "id": item.id, "operation": item.operation,
+                "filePath": item.file_path, "line": item.line, "character": item.character,
+                "status": item.status, "server": item.server,
+                "result": item.result.as_deref().map(|result| truncate(result, DEFAULT_OUTPUT_CHARS))
             }),
             ThreadItemPayload::ImageGeneration(item) => {
                 let mut image = json!({

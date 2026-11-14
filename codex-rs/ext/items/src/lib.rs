@@ -9,6 +9,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 pub mod image_generation;
+pub mod lsp;
 pub mod sleep;
 pub mod web_search;
 
@@ -42,6 +43,9 @@ pub enum ExtensionItem {
     #[serde(rename = "web.search")]
     #[ts(rename = "web.search")]
     WebSearch(web_search::WebSearchItem),
+    #[serde(rename = "lsp.request")]
+    #[ts(rename = "lsp.request")]
+    Lsp(lsp::LspItem),
 }
 
 impl ExtensionItem {
@@ -52,6 +56,7 @@ impl ExtensionItem {
             Self::ImageGeneration(item) => &item.id,
             Self::Sleep(item) => &item.id,
             Self::WebSearch(item) => &item.id,
+            Self::Lsp(item) => &item.id,
         }
     }
 }
