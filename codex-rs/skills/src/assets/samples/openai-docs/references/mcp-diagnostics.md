@@ -12,6 +12,8 @@ Use this route only when the user explicitly asks to configure or troubleshoot t
    codex mcp add openaiDeveloperDocs --url https://developers.openai.com/mcp
    ```
 
+   In Onigio the command is `onigio mcp add …` and the configuration goes in `~/.onigio/config.toml`; in the Onigio app, `/mcp` lists and manages servers.
+
    The equivalent documented configuration is:
 
    ```toml

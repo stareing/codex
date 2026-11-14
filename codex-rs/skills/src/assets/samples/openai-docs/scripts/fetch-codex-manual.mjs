@@ -16,13 +16,14 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { inspect, promisify } from "node:util";
 
-const DEFAULT_MANUAL_URL =
-  "https://developers.openai.com/codex/codex-manual.md";
+// developers.openai.com/codex/codex-manual.md answers 308 to this address (checked 2026-11-14) and the
+// helper does not follow redirects.
+const DEFAULT_MANUAL_URL = "https://learn.chatgpt.com/docs/codex-manual.md";
 const DEFAULT_CACHE_DIR_NAME = "openai-docs-cache";
 const CACHE_FILE_NAME = "codex-manual.md";
 const OUTLINE_FILE_NAME = "codex-manual.outline.md";
 const HASH_HEADER = "x-content-sha256";
-const USER_AGENT = "codex-openai-docs";
+const USER_AGENT = "onigio-openai-docs";
 const execFileAsync = promisify(execFile);
 
 class ManualFetchError extends Error {

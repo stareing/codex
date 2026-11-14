@@ -1,5 +1,7 @@
 # Codex self-knowledge
 
+In Onigio, apply the substitutions in `SKILL.md` («In Onigio»): the manual describes the shared agent core with `~/.codex` paths and the `codex` command; Onigio uses `~/.onigio` and `onigio`, and its own app features are not in the manual.
+
 Use this manual-first route only for genuinely broad Codex setup, orientation, customization, troubleshooting, local-state guidance, or system-map synthesis across skills, plugins, MCP, hooks, `AGENTS.md`, automations, and product surfaces. Mixed Chat/Work/Codex comparisons belong to `official-docs.md` instead.
 
 Narrow Codex documentation questions require official documentation search first, then an actual page open or fetch using an available documentation or official-domain web capability. This includes a single feature such as Codex Goals, a specific setting, documented behavior, exact error, or requested page citation. Search and fetch the exact official topic before inspecting local files or bundled references. Do not fetch the manual, read bundled references, inspect local configuration or caches, or turn a targeted documentation lookup into broad product synthesis. Current or latest model questions follow the model-selection route.
@@ -51,7 +53,7 @@ If official documentation conflicts with a callable capability verified in the c
 - Prompt or thread context: one-off task constraints.
 - Repository `AGENTS.md`: durable team conventions, commands, and verification expectations; nested files apply more specifically within their subtree.
 - Project `.codex/config.toml`: settings for a trusted repository, including sandbox, MCP, hooks, model, and reasoning defaults.
-- Global config or global guidance: personal defaults across repositories.
+- Global config or global guidance (`~/.onigio/config.toml`, `~/.onigio/AGENTS.md` in Onigio): personal defaults across repositories.
 - Skill: a reusable workflow, optionally with focused references or scripts.
 - Plugin: an installable bundle of skills, tools, commands, MCP configuration, hooks, apps, assets, or related metadata.
 - MCP server or app connector: authorized live external data and actions. Use an authenticated connector, not web search or memory, for private Google Docs, Calendar, Slack, GitHub, Notion, or similar workspace data.
