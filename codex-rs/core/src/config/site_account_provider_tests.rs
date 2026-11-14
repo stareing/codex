@@ -306,3 +306,17 @@ async fn site_provider_uses_its_own_catalog_seeded_with_the_suggested_model() {
         None
     );
 }
+
+#[test]
+fn desktop_custom_model_lists_only_itself() {
+    let catalog = desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some("claude-opus-5-5"), None)
+        .expect("a custom model has a catalog");
+    let slugs: Vec<&str> = catalog.models.iter().map(|m| m.slug.as_str()).collect();
+    assert_eq!(slugs, vec!["claude-opus-5-5"]);
+    assert_eq!(catalog.models[0].visibility, ModelVisibility::List);
+    // other providers, no model, or a catalog the user set keep the usual list
+    assert_eq!(desktop_custom_catalog("openai", Some("gpt-5.5"), None), None);
+    assert_eq!(desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, None, None), None);
+    assert_eq!(desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some(" "), None), None);
+    assert_eq!(desktop_custom_catalog(DESKTOP_CUSTOM_PROVIDER_ID, Some("m"), Some(&catalog)), None);
+}

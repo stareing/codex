@@ -337,6 +337,29 @@ pub fn own_catalog_fallback(
     Some(ModelsResponse { models })
 }
 
+/// The Onigio desktop app's own-endpoint provider (`apps/desktop/core/src/custom_model.rs` `PROVIDER_ID`): the app
+/// starts the agent with one model the user configured, on a server that has none of the bundled upstream presets.
+pub const DESKTOP_CUSTOM_PROVIDER_ID: &str = "onigio_custom";
+
+/// The catalog of the desktop app's custom model when no `model_catalog_json` is set: just that model. Without it
+/// `model/list` showed the bundled upstream presets next to it (11-14), which that endpoint does not serve.
+pub fn desktop_custom_catalog(
+    provider_id: &str,
+    model: Option<&str>,
+    configured_catalog: Option<&ModelsResponse>,
+) -> Option<ModelsResponse> {
+    if provider_id != DESKTOP_CUSTOM_PROVIDER_ID || configured_catalog.is_some() {
+        return None;
+    }
+    let slug = model.map(str::trim).filter(|slug| !slug.is_empty())?;
+    Some(ModelsResponse {
+        models: vec![ModelInfo {
+            visibility: ModelVisibility::List,
+            ..model_info_from_slug(slug)
+        }],
+    })
+}
+
 /// The device token, or `None` when missing, empty, too long or not visible ASCII.
 fn read_token(path: &Path) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
