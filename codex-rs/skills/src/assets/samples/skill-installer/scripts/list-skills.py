@@ -5,14 +5,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import urllib.error
 
 from github_utils import github_api_contents_url, github_request
+from skill_home import DEFAULT_SOURCE, SOURCES, installed_skills
 
-DEFAULT_REPO = "openai/skills"
-DEFAULT_PATH = "skills/.curated"
 DEFAULT_REF = "main"
 
 
@@ -21,30 +19,23 @@ class ListError(Exception):
 
 
 class Args(argparse.Namespace):
-    repo: str
-    path: str
+    source: str
+    repo: str | None
+    path: str | None
     ref: str
     format: str
 
 
 def _request(url: str) -> bytes:
-    return github_request(url, "codex-skill-list")
+    return github_request(url, "onigio-skill-list")
 
 
-def _codex_home() -> str:
-    return os.environ.get("CODEX_HOME", os.path.expanduser("~/.codex"))
-
-
-def _installed_skills() -> set[str]:
-    root = os.path.join(_codex_home(), "skills")
-    if not os.path.isdir(root):
-        return set()
-    entries = set()
-    for name in os.listdir(root):
-        path = os.path.join(root, name)
-        if os.path.isdir(path):
-            entries.add(name)
-    return entries
+def _repo_and_path(args: Args) -> tuple[str, str]:
+    """`--repo`/`--path` win over `--source`; a `--repo` without `--path` lists `skills`."""
+    source_repo, source_path = SOURCES[args.source]
+    if args.repo:
+        return args.repo, args.path or "skills"
+    return source_repo, args.path or source_path
 
 
 def _list_skills(repo: str, path: str, ref: str) -> list[str]:
@@ -66,11 +57,16 @@ def _list_skills(repo: str, path: str, ref: str) -> list[str]:
 
 def _parse_args(argv: list[str]) -> Args:
     parser = argparse.ArgumentParser(description="List skills.")
-    parser.add_argument("--repo", default=DEFAULT_REPO)
+    parser.add_argument(
+        "--source",
+        choices=sorted(SOURCES),
+        default=DEFAULT_SOURCE,
+        help="A known skills repo (default: openai = openai/skills skills/.curated)",
+    )
+    parser.add_argument("--repo", help="Any GitHub owner/repo instead of --source")
     parser.add_argument(
         "--path",
-        default=DEFAULT_PATH,
-        help="Repo path to list (default: skills/.curated)",
+        help="Repo path to list (default: the source's, or skills with --repo)",
     )
     parser.add_argument("--ref", default=DEFAULT_REF)
     parser.add_argument(
@@ -85,8 +81,9 @@ def _parse_args(argv: list[str]) -> Args:
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
     try:
-        skills = _list_skills(args.repo, args.path, args.ref)
-        installed = _installed_skills()
+        repo, path = _repo_and_path(args)
+        skills = _list_skills(repo, path, args.ref)
+        installed = installed_skills()
         if args.format == "json":
             payload = [
                 {"name": name, "installed": name in installed} for name in skills

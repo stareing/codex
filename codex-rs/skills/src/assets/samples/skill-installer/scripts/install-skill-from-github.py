@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a skill from a GitHub repo path into $CODEX_HOME/skills."""
+"""Install a skill from a GitHub repo path into the agent's skills folder (`$CODEX_HOME/skills`, ~/.onigio/skills)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import urllib.parse
 import zipfile
 
 from github_utils import github_request
+from skill_home import install_root
 
 DEFAULT_REF = "main"
 
@@ -43,18 +44,14 @@ class InstallError(Exception):
     pass
 
 
-def _codex_home() -> str:
-    return os.environ.get("CODEX_HOME", os.path.expanduser("~/.codex"))
-
-
 def _tmp_root() -> str:
-    base = os.path.join(tempfile.gettempdir(), "codex")
+    base = os.path.join(tempfile.gettempdir(), "onigio")
     os.makedirs(base, exist_ok=True)
     return base
 
 
 def _request(url: str) -> bytes:
-    return github_request(url, "codex-skill-install")
+    return github_request(url, "onigio-skill-install")
 
 
 def _parse_github_url(url: str, default_ref: str) -> tuple[str, str, str, str | None]:
@@ -288,7 +285,7 @@ def _resolve_source(args: Args) -> Source:
 
 
 def _default_dest() -> str:
-    return os.path.join(_codex_home(), "skills")
+    return install_root()
 
 
 def _parse_args(argv: list[str]) -> Args:
